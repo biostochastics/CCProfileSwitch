@@ -241,18 +241,53 @@ def detect_current_token() -> Optional[str]:
         except (subprocess.CalledProcessError, KeyError):
             pass
 
-    # Try Linux/common file locations
-    credential_file = Path.home() / ".claude" / ".credentials.json"
-    if credential_file.exists():
-        try:
-            with open(credential_file, "r") as f:
-                data = json.load(f)
-                # Look for token in various possible keys
-                for key in ["token", "accessToken", "auth_token", "api_key"]:
-                    if key in data:
-                        return data[key]
-        except Exception:
-            pass
+    # Try platform-specific file locations
+    credential_paths = []
+
+    if sys.platform == "win32":
+        # Windows credential locations
+        credential_paths.extend(
+            [
+                Path.home() / "AppData" / "Roaming" / "Claude" / ".credentials.json",
+                Path.home() / "AppData" / "Local" / "Claude" / ".credentials.json",
+            ]
+        )
+
+    # Linux/Unix and fallback paths
+    credential_paths.extend(
+        [
+            Path.home() / ".claude" / ".credentials.json",
+            Path.home() / ".config" / "claude" / "credentials.json",
+        ]
+    )
+
+    for credential_file in credential_paths:
+        if credential_file.exists():
+            try:
+                with open(credential_file, "r") as f:
+                    content = f.read().strip()
+
+                    # Try to parse as JSON first
+                    try:
+                        data = json.loads(content)
+
+                        # Check for OAuth format (like macOS Keychain)
+                        if (
+                            "claudeAiOauth" in data
+                            and "accessToken" in data["claudeAiOauth"]
+                        ):
+                            return data["claudeAiOauth"]["accessToken"]
+
+                        # Look for token in various possible keys
+                        for key in ["token", "accessToken", "auth_token", "api_key"]:
+                            if key in data:
+                                return data[key]
+                    except json.JSONDecodeError:
+                        # Not JSON - might be plain token
+                        if content and validate_token(content):
+                            return content
+            except Exception:
+                continue
 
     # Fallback to searching other config paths
     for path in find_claude_config_paths():

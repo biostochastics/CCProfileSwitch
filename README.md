@@ -14,7 +14,7 @@ Whether you're switching between client accounts, separating personal and work u
 
 ## How It Works
 
-CCProfileSwitch stores your API tokens in your system's native credential manager (macOS Keychain, Windows Credential Manager, or Linux Secret Service) and maintains profile metadata separately. When you need to switch contexts, you run `claude-profile switch <name>`, and the tool writes that profile's token to Claude Code's credential file. The workflow looks like this:
+CCProfileSwitch stores your API tokens in your system's native credential manager (macOS Keychain, Windows Credential Manager, or Linux Secret Service) and maintains profile metadata separately. On first run, it automatically detects your existing Claude Code credentials and imports them as a profile—no manual token entry needed. When you need to switch contexts, you run `claude-profile switch <name>`, and the tool writes that profile's token to Claude Code's credential file. The workflow looks like this:
 
 ```bash
 # Morning: Start with client-a work
@@ -38,7 +38,7 @@ Profile switching is instant, secure, and deterministic. You always know which c
 
 ## Quick Start
 
-Install CCProfileSwitch and create your first profile:
+Install CCProfileSwitch and let it auto-detect your current Claude token:
 
 ```bash
 # Clone and install
@@ -46,17 +46,23 @@ git clone https://github.com/biostochastics/CCProfileSwitch.git
 cd CCProfileSwitch
 poetry install
 
-# Initialize with guided setup
+# Initialize - auto-detects and imports your current token
 poetry run claude-profile init
 
-# Save your first profile (prompts for API token)
+# Save additional profiles (auto-detects current token or prompts)
+poetry run claude-profile save work
 poetry run claude-profile save personal
 
-# Switch to the profile
-poetry run claude-profile switch personal
+# Switch between profiles
+poetry run claude-profile switch work
 ```
 
-After setup, Claude Code will use the active profile's credentials for all API requests.
+The `init` command automatically detects your existing Claude Code credentials from:
+- **macOS**: Keychain (OAuth tokens)
+- **Linux**: `~/.claude/.credentials.json`
+- **Windows**: `AppData/Roaming/Claude/.credentials.json`
+
+After setup, Claude Code immediately uses the active profile's credentials for all API requests.
 
 ## Common Workflows
 
@@ -140,9 +146,15 @@ claude-profile --help
 CCProfileSwitch stores API tokens in your operating system's credential manager, never in plaintext files except for the single active credential file that Claude Code monitors (`~/.claude/.credentials.json`). This file contains only the currently active token and has file permissions set to 0600 (owner read/write only).
 
 **Credential Storage:**
-- macOS: Keychain with AES-128 encryption
+- macOS: Keychain with AES-128 encryption (supports OAuth tokens)
 - Windows: Credential Manager with DPAPI encryption
 - Linux: Secret Service (GNOME Keyring / KWallet) with libsecret
+
+**Auto-Detection:**
+- Automatically detects existing Claude Code credentials on first run
+- macOS: Reads from Keychain service "Claude Code-credentials" (OAuth format supported)
+- Linux/Windows: Reads from `~/.claude/.credentials.json` or platform-specific paths
+- Supports both OAuth access tokens and API keys
 
 **What's Protected:**
 - Profile metadata and tokens stored in encrypted system keyring
