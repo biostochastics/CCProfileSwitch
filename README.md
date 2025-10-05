@@ -1,12 +1,6 @@
 # CCProfileSwitch
 
-<p align="center">
-  <img src="assets/logo.png" alt="CCProfileSwitch Logo" width="300"/>
-</p>
-
-<p align="center">
-  <strong>Seamless Claude Code profile management with secure credential storage and cross-platform support</strong>
-</p>
+**Seamless Claude Code profile management with secure credential storage and cross-platform support**
 
 [![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/biostochastics/CCProfileSwitch) [![Python Version](https://img.shields.io/badge/python-3.8.1%2B-blue)](https://www.python.org/downloads/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Typer](https://img.shields.io/badge/CLI-typer-green)](https://typer.tiangolo.com/) [![Rich](https://img.shields.io/badge/UI-rich-orange)](https://rich.readthedocs.io/) [![Keyring](https://img.shields.io/badge/security-keyring-red)](https://github.com/jaraco/keyring)
 
