@@ -202,20 +202,70 @@ def format_timestamp(timestamp: Optional[str]) -> str:
 
 
 def detect_current_token() -> Optional[str]:
-    """Try to detect the current Claude token from common locations."""
+    """Try to detect the current Claude token from OS-specific locations."""
+    import json
+    import os
+    import subprocess
+
+    # Try macOS Keychain first
+    if sys.platform == "darwin":
+        try:
+            result = subprocess.run(
+                [
+                    "security",
+                    "find-generic-password",
+                    "-a",
+                    os.environ.get("USER", ""),
+                    "-s",
+                    "Claude Code-credentials",
+                    "-w",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            keychain_data = result.stdout.strip()
+            if keychain_data:
+                # Try to parse as JSON (OAuth format)
+                try:
+                    data = json.loads(keychain_data)
+                    # Extract accessToken from claudeAiOauth
+                    if (
+                        "claudeAiOauth" in data
+                        and "accessToken" in data["claudeAiOauth"]
+                    ):
+                        return data["claudeAiOauth"]["accessToken"]
+                except json.JSONDecodeError:
+                    # Not JSON, return as-is (plain token)
+                    return keychain_data
+        except (subprocess.CalledProcessError, KeyError):
+            pass
+
+    # Try Linux/common file locations
+    credential_file = Path.home() / ".claude" / ".credentials.json"
+    if credential_file.exists():
+        try:
+            with open(credential_file, "r") as f:
+                data = json.load(f)
+                # Look for token in various possible keys
+                for key in ["token", "accessToken", "auth_token", "api_key"]:
+                    if key in data:
+                        return data[key]
+        except Exception:
+            pass
+
+    # Fallback to searching other config paths
     for path in find_claude_config_paths():
         try:
             if path.exists():
                 with open(path, "r") as f:
-                    import json
-
                     data = json.load(f)
-                    # Look for token in various possible keys
                     for key in ["token", "accessToken", "auth_token", "api_key"]:
                         if key in data:
                             return data[key]
         except Exception:
             continue
+
     return None
 
 

@@ -87,35 +87,18 @@ def init(
         f"[green]✓ Keyring backend: {storage.check_keyring_backend()}[/green]"
     )
 
-    # Setup token target
-    if interactive and not token_target:
-        console.print("\n[bold]Active Token Storage Configuration[/bold]")
-        console.print(
-            "This determines where your currently active Claude token will be stored."
-        )
-
+    # Setup token target - auto-use default or first found path
+    if not token_target:
         found_paths = find_claude_config_paths()
         if found_paths:
-            console.print("\n[yellow]Found existing Claude configurations:[/yellow]")
-            for i, path in enumerate(found_paths, 1):
-                console.print(f"  {i}. {path}")
+            token_target = str(found_paths[0])
+            show_info(f"Using existing Claude config: {token_target}")
+        else:
+            token_target = str(config.get_active_token_path())
+            show_info(f"Using default token path: {token_target}")
 
-            if Confirm.ask("Use one of these paths?", default=True):
-                choice = Prompt.ask(
-                    "Select path number",
-                    choices=[str(i) for i in range(1, len(found_paths) + 1)],
-                )
-                token_target = str(found_paths[int(choice) - 1])
-
-        if not token_target:
-            default_path = config.get_active_token_path()
-            token_target = Prompt.ask(
-                "Enter path for active token storage", default=default_path
-            )
-
-    if token_target:
-        config.set_active_token_target("file", token_target)
-        show_success(f"Active token will be stored in: {token_target}")
+    config.set_active_token_target("file", token_target)
+    show_success(f"Active token storage: {token_target}")
 
     # Setup default profile
     if interactive and not default_profile:
@@ -129,30 +112,30 @@ def init(
         config.set_default_profile(default_profile)
         show_success(f"Default profile set to: {default_profile}")
 
-    # Import existing token if found
-    if interactive:
-        current_token = detect_current_token()
-        if current_token and validate_token(current_token):
-            console.print(
-                f"\n[yellow]Found existing Claude token: "
-                f"{mask_token(current_token)}[/yellow]"
-            )
-            if Confirm.ask("Import this token as 'default' profile?", default=True):
-                metadata = {
-                    "created": datetime.now().isoformat(),
-                    "description": "Imported from existing configuration",
-                }
-                if storage.save_profile("default", current_token, metadata):
-                    existing_profiles = storage.list_profiles()
-                    if existing_profiles:
-                        all_profile_names = [k for k in existing_profiles.keys()]
-                    else:
-                        all_profile_names = []
+    # Import existing token if found - auto-import without asking
+    current_token = detect_current_token()
+    if current_token and validate_token(current_token):
+        show_info(f"Detected current token: {mask_token(current_token)}")
+        metadata = {
+            "created": datetime.now().isoformat(),
+            "description": "Auto-imported from existing configuration",
+        }
+        if storage.save_profile("default", current_token, metadata):
+            existing_profiles = storage.list_profiles()
+            if existing_profiles:
+                all_profile_names = [k for k in existing_profiles.keys()]
+            else:
+                all_profile_names = []
 
-                    if "default" not in all_profile_names:
-                        all_profile_names.insert(0, "default")
-                    storage.update_profile_list(all_profile_names)
-                    show_success("Imported existing token as 'default' profile")
+            if "default" not in all_profile_names:
+                all_profile_names.insert(0, "default")
+            storage.update_profile_list(all_profile_names)
+            show_success("Auto-imported current token as 'default' profile")
+    else:
+        show_warning(
+            "No current token detected - use 'claude-profile save <name>' "
+            "to create your first profile"
+        )
 
     show_success(
         "Setup complete! You can now use 'claude-profile save', 'switch', 'list' etc."
@@ -193,7 +176,10 @@ def save(
     # Get token
     if not token:
         token = detect_current_token()
-        if not token:
+        if token:
+            show_info(f"Auto-detected current token: {mask_token(token)}")
+        else:
+            show_warning("No current token detected - please enter manually")
             token = Prompt.ask("Enter your Claude token", password=True)
 
     if not validate_token(token):
