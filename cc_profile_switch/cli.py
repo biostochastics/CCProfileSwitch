@@ -368,7 +368,8 @@ def list(
         if active_profile:
             active_icon = get_icon("active")
             console.print(
-                f"[success]{active_icon} Active profile: [bold]{active_profile}[/bold][/success]"
+                f"[success]{active_icon} Active profile: "
+                f"[bold]{active_profile}[/bold][/success]"
             )
             console.print()
         console.print(table)
