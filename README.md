@@ -41,21 +41,23 @@ Profile switching is instant, secure, and deterministic. You always know which c
 Install CCProfileSwitch and let it auto-detect your current Claude token:
 
 ```bash
-# Clone and install
+# Clone and install with pipx (recommended)
 git clone https://github.com/biostochastics/CCProfileSwitch.git
 cd CCProfileSwitch
-poetry install
+pipx install .
 
 # Initialize - auto-detects and imports your current token
-poetry run claude-profile init
+claude-profile init
 
 # Save additional profiles (auto-detects current token or prompts)
-poetry run claude-profile save work
-poetry run claude-profile save personal
+claude-profile save work
+claude-profile save personal
 
 # Switch between profiles
-poetry run claude-profile switch work
+claude-profile switch work
 ```
+
+**Note:** If using Poetry for development, prefix commands with `poetry run` or use `poetry shell` first. See [Installation](#installation) for details.
 
 The `init` command automatically detects your existing Claude Code credentials from:
 - **macOS**: Keychain (OAuth tokens)
@@ -123,14 +125,50 @@ Profiles persist in your system keyring, so they survive reboots and are isolate
 
 ## Installation
 
+### Using pipx (Recommended for Daily Use)
+
+Install globally without affecting your system Python:
+
+```bash
+git clone https://github.com/biostochastics/CCProfileSwitch.git
+cd CCProfileSwitch
+
+# Install pipx if needed
+brew install pipx  # macOS
+# or: pip install --user pipx  # Linux/Windows
+
+# Install CCProfileSwitch globally
+pipx install .
+
+# Now works from anywhere without poetry run
+claude-profile --help
+claude-profile init
+```
+
 ### Using Poetry (Recommended for Development)
 
 ```bash
 git clone https://github.com/biostochastics/CCProfileSwitch.git
 cd CCProfileSwitch
 poetry install
+
+# Option 1: Use poetry run before each command
 poetry run claude-profile --help
+
+# Option 2: Activate virtual environment once
+poetry shell
+claude-profile --help  # Now works without poetry run
 ```
+
+### Shell Alias (Quick Setup)
+
+Add to `~/.zshrc` or `~/.bashrc`:
+
+```bash
+alias claude-profile='poetry -C /Users/YOUR_USERNAME/CCProfileSwitch run claude-profile'
+```
+
+Then reload: `source ~/.zshrc`
 
 ### Future: PyPI Installation
 
