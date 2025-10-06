@@ -316,14 +316,27 @@ def detect_current_token() -> Optional[str]:
                         data = json.loads(content)
 
                         # Check for OAuth format (like macOS Keychain)
+                        # Return COMPLETE JSON to preserve refreshToken, mcpOAuth, etc.
                         if (
                             "claudeAiOauth" in data
                             and "accessToken" in data["claudeAiOauth"]
                         ):
-                            return data["claudeAiOauth"]["accessToken"]
+                            return content  # Return full JSON string!
 
-                        # Look for token in various possible keys
-                        for key in ["token", "accessToken", "auth_token", "api_key"]:
+                        # Look for wrapped token format {"token": "..."}
+                        if "token" in data:
+                            # Check if the token itself is OAuth JSON
+                            token_value = data["token"]
+                            try:
+                                token_data = json.loads(token_value)
+                                if "claudeAiOauth" in token_data:
+                                    return token_value  # Return OAuth JSON
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                            return token_value  # Return plain token
+
+                        # Check other possible keys (legacy formats)
+                        for key in ["accessToken", "auth_token", "api_key"]:
                             if key in data:
                                 return data[key]
                     except json.JSONDecodeError:
@@ -338,10 +351,28 @@ def detect_current_token() -> Optional[str]:
         try:
             if path.exists():
                 with open(path, "r") as f:
-                    data = json.load(f)
+                    content = f.read().strip()
+                    data = json.loads(content)
+
+                    # Check for OAuth structure
+                    if (
+                        "claudeAiOauth" in data
+                        and "accessToken" in data["claudeAiOauth"]
+                    ):
+                        return content  # Return full JSON
+
+                    # Check standard token keys
                     for key in ["token", "accessToken", "auth_token", "api_key"]:
                         if key in data:
-                            return data[key]
+                            token_value = data[key]
+                            # Check if it's OAuth JSON
+                            try:
+                                token_data = json.loads(token_value)
+                                if "claudeAiOauth" in token_data:
+                                    return token_value
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                            return token_value
         except Exception:
             continue
 
