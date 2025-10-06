@@ -97,7 +97,9 @@ The `init` command automatically detects your existing Claude Code credentials f
 - ✅ Preserves complete OAuth session including `refreshToken` for seamless authentication
 - ✅ Maintains MCP server OAuth tokens (`mcpOAuth`) for persistent MCP connections
 - ✅ Supports both OAuth tokens (`sk-ant-oat*`, `sk-ant-ort*`) and API keys (`sk-ant-api*`)
-- ✅ Works on macOS (Keychain), Linux (.credentials.json), and Windows (credential files)
+- ✅ Works on macOS (Keychain - tested), Linux (.credentials.json), and Windows (credential files)
+
+> **Note**: OAuth preservation has been verified on macOS. Linux/Windows OAuth support is implemented and should work correctly, but has not been tested on those platforms yet. Please report any issues!
 
 After setup, Claude Code immediately uses the active profile's credentials for all requests.
 
@@ -289,9 +291,11 @@ CCProfileSwitch requires minimal configuration. The tool automatically detects y
 
 | Platform | Profile Storage | Active Session | OAuth Support |
 |----------|----------------|----------------|---------------|
-| **macOS** | System Keyring (`claude-profile-manager`) | Keychain (`Claude Code-credentials`) | ✅ Full OAuth with refreshToken + MCP |
-| **Windows** | Credential Manager (DPAPI) | `AppData/Roaming/Claude/.credentials.json` | ✅ Full OAuth with refreshToken + MCP |
-| **Linux** | Secret Service (libsecret) | `~/.claude/.credentials.json` | ✅ Full OAuth with refreshToken + MCP |
+| **macOS** | System Keyring (`claude-profile-manager`) | Keychain (`Claude Code-credentials`) | ✅ Full OAuth (tested) |
+| **Windows** | Credential Manager (DPAPI) | `AppData/Roaming/Claude/.credentials.json` | ✅ Full OAuth (untested) |
+| **Linux** | Secret Service (libsecret) | `~/.claude/.credentials.json` | ✅ Full OAuth (untested) |
+
+> **Testing Status**: macOS OAuth support has been verified. Windows/Linux implementations are complete but await real-world testing.
 
 **macOS Architecture Details:**
 - Profiles: System Keyring stores `{"token": "{OAuth JSON}", "metadata": {...}}`
