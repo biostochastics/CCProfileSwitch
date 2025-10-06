@@ -130,7 +130,7 @@ def show_info(message: str, **kwargs) -> None:
         print(f"{icon} {message}")
 
 
-def show_spinner(message: str, spinner_type: str = "dots") -> Live:
+def show_spinner(message: str, spinner_type: str = "dots") -> Optional[Live]:
     """Create a spinner context for operations."""
     if should_use_rich():
         spinner = Spinner(spinner_type, text=message, style="accent")

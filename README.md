@@ -6,15 +6,36 @@
 
 ## Why CCProfileSwitch?
 
-If you juggle multiple Claude API accounts across personal and professional projects, you know the friction: manually editing credential files, risking context slips where you accidentally use the wrong account, and storing API keys in plaintext configuration. CCProfileSwitch eliminates this workflow tax by managing profiles in your operating system's secure keyring and switching contexts with a single command.
+If you juggle multiple Claude accounts across personal and professional projects, you know the friction: manually re-authenticating, risking context slips where you accidentally use the wrong account, and managing OAuth sessions. CCProfileSwitch eliminates this workflow tax by managing complete authentication profiles in your operating system's secure storage and switching contexts with a single command.
 
-The tool integrates directly with Claude Code by updating `~/.claude/.credentials.json`, the credential file Claude Code monitors for authentication. When you switch profiles, Claude Code immediately uses the new credentials for subsequent requests—no restart required, no manual file edits, no plaintext keys scattered across config files.
+The tool integrates directly with Claude Code's authentication system:
+- **macOS**: Writes complete OAuth credentials (including refresh tokens) to macOS Keychain, preserving MCP server authentication
+- **Linux/Windows**: Updates credential files that Claude Code monitors
+
+When you switch profiles, Claude Code immediately uses the new authentication for subsequent requests—no restart required, no manual re-login, no lost MCP connections.
 
 Whether you're switching between client accounts, separating personal and work usage, or managing team credentials, CCProfileSwitch handles the mechanics so you can focus on your actual work.
 
 ## How It Works
 
-CCProfileSwitch stores your API tokens in your system's native credential manager (macOS Keychain, Windows Credential Manager, or Linux Secret Service) and maintains profile metadata separately. On first run, it automatically detects your existing Claude Code credentials and imports them as a profile—no manual token entry needed. When you need to switch contexts, you run `claude-profile switch <name>`, and the tool writes that profile's token to Claude Code's credential file. The workflow looks like this:
+CCProfileSwitch stores complete authentication credentials in your system's native secure storage:
+
+**macOS Architecture:**
+- **Profile Storage**: System Keyring (`claude-profile-manager` service)
+  - Stores complete OAuth JSON including `accessToken`, `refreshToken`, `expiresAt`, `scopes`, `subscriptionType`
+  - Preserves MCP server OAuth tokens (`mcpOAuth`)
+  - Profile metadata (description, creation date)
+
+- **Active Session**: macOS Keychain (`Claude Code-credentials` service)
+  - Full OAuth structure written via `security` command
+  - Claude Code reads directly from Keychain
+  - No credential file created on disk (Keychain-only)
+
+**Linux/Windows Architecture:**
+- **Profile Storage**: System credential manager (GNOME Keyring, KWallet, Windows Credential Manager)
+- **Active Session**: `~/.claude/.credentials.json` (file-based)
+
+On first run, it automatically detects your existing Claude Code credentials and imports them as a profile—no manual token entry needed. When you need to switch contexts, you run `claude-profile switch <name>`, and the tool writes that profile's complete authentication to Claude Code's storage. The workflow looks like this:
 
 ```bash
 # Morning: Start with client-a work
@@ -34,7 +55,9 @@ $ claude-profile current
   Token: sk-a***
 ```
 
-Profile switching is instant, secure, and deterministic. You always know which context is active, and your credentials never touch version control or plaintext files beyond Claude Code's monitored credential file.
+Profile switching is instant, secure, and deterministic. You always know which context is active, and your credentials are stored securely:
+- **macOS**: All credentials in Keychain (OAuth tokens never written to disk)
+- **Linux/Windows**: Active credentials in monitored file, profiles in system credential manager
 
 ## Quick Start
 
@@ -66,11 +89,16 @@ claude-profile switch work
 **Note:** If using Poetry for development, prefix commands with `poetry run` or use `poetry shell` first. See [Installation](#installation) for details.
 
 The `init` command automatically detects your existing Claude Code credentials from:
-- **macOS**: Keychain (OAuth tokens)
-- **Linux**: `~/.claude/.credentials.json`
-- **Windows**: `AppData/Roaming/Claude/.credentials.json`
+- **macOS**: Keychain service `Claude Code-credentials` (complete OAuth structure including refreshToken)
+- **Linux**: `~/.claude/.credentials.json` or platform-specific paths
+- **Windows**: `AppData/Roaming/Claude/.credentials.json` or `AppData/Local/Claude/.credentials.json`
 
-After setup, Claude Code immediately uses the active profile's credentials for all API requests.
+**OAuth Support (macOS):**
+- Preserves complete OAuth session including `refreshToken` for seamless authentication
+- Maintains MCP server OAuth tokens (`mcpOAuth`) for persistent MCP connections
+- Supports both OAuth tokens (`sk-ant-oat*`) and API keys (`sk-ant-api*`)
+
+After setup, Claude Code immediately uses the active profile's credentials for all requests.
 
 ## Common Workflows
 
@@ -102,7 +130,11 @@ $ claude-profile switch client-b
 $ claude-profile switch work
 ```
 
-Each switch updates `~/.claude/.credentials.json` atomically. Claude Code detects the change immediately, so your next request uses the correct credentials.
+Each switch updates Claude Code's authentication storage atomically:
+- **macOS**: Updates Keychain entry (no file modification)
+- **Linux/Windows**: Updates `~/.claude/.credentials.json`
+
+Claude Code detects the change immediately, so your next request uses the correct credentials.
 
 ### Managing Multiple Clients
 
@@ -187,30 +219,51 @@ claude-profile --help
 
 ## Security
 
-CCProfileSwitch stores API tokens in your operating system's credential manager, never in plaintext files except for the single active credential file that Claude Code monitors (`~/.claude/.credentials.json`). This file contains only the currently active token and has file permissions set to 0600 (owner read/write only).
+CCProfileSwitch stores authentication credentials in your operating system's secure credential storage with platform-specific optimizations.
 
-**Credential Storage:**
-- macOS: Keychain with AES-128 encryption (supports OAuth tokens)
-- Windows: Credential Manager with DPAPI encryption
-- Linux: Secret Service (GNOME Keyring / KWallet) with libsecret
+**Credential Storage by Platform:**
 
-**Auto-Detection:**
+**macOS (Keychain-Only):**
+- **Profile Storage**: System Keyring service `claude-profile-manager`
+  - AES-128 encryption via macOS Keychain
+  - Stores complete OAuth JSON (accessToken, refreshToken, expiresAt, scopes, mcpOAuth)
+- **Active Session**: Keychain service `Claude Code-credentials`
+  - Written via `security` command for Claude Code compatibility
+  - **No credential file created** - fully Keychain-based
+  - Preserves refresh tokens for persistent authentication
+  - Maintains MCP server OAuth tokens
+
+**Windows:**
+- Profile Storage: Credential Manager with DPAPI encryption
+- Active Session: File at `AppData/Roaming/Claude/.credentials.json` (0600 permissions)
+
+**Linux:**
+- Profile Storage: Secret Service (GNOME Keyring / KWallet) with libsecret
+- Active Session: File at `~/.claude/.credentials.json` (0600 permissions)
+
+**Auto-Detection & OAuth Support:**
 - Automatically detects existing Claude Code credentials on first run
-- macOS: Reads from Keychain service "Claude Code-credentials" (OAuth format supported)
-- Linux/Windows: Reads from `~/.claude/.credentials.json` or platform-specific paths
-- Supports both OAuth access tokens and API keys
+- **macOS**: Reads complete OAuth structure from Keychain, including:
+  - `accessToken` (sk-ant-oat*) - Active authentication token
+  - `refreshToken` (sk-ant-ort*) - Token refresh capability
+  - `expiresAt`, `scopes`, `subscriptionType` - Session metadata
+  - `mcpOAuth` - MCP server authentication tokens
+- **Linux/Windows**: Reads from credential files or platform-specific paths
+- Supports both OAuth tokens and API keys (sk-ant-api*)
 
 **What's Protected:**
-- Profile metadata and tokens stored in encrypted system keyring
+- **All credentials encrypted** in system-native credential storage
 - Concurrent access protected by file locking (5-second timeout)
 - Token format validation enforces `sk-ant-*` pattern
 - Atomic writes prevent partial credential updates
+- macOS: Complete OAuth structure preserved (never loses refresh tokens)
 
 **What's Not Protected:**
-- Active credential file (`~/.claude/.credentials.json`) contains plaintext token for Claude Code compatibility
+- **macOS**: All credentials stay in Keychain (maximum security)
+- **Linux/Windows**: Active credential file contains plaintext for Claude Code compatibility
 - Exported backups with `--include-tokens` flag contain plaintext tokens (user must encrypt)
 
-For shared or multi-user systems, verify file permissions with `claude-profile doctor`. Each user's keyring is isolated, but ensure no other users have filesystem access to your `~/.claude/` directory.
+For shared or multi-user systems, verify security with `claude-profile doctor`. Each user's credential storage is isolated.
 
 When exporting profiles with `--include-tokens` for backup or migration, immediately encrypt the export file:
 
@@ -232,11 +285,16 @@ CCProfileSwitch requires minimal configuration. The tool automatically detects y
 
 **Storage Locations:**
 
-| Item | Location | Description |
-|------|----------|-------------|
-| Active credential | `~/.claude/.credentials.json` | Claude Code credential file (updated on switch) |
-| Profile metadata | OS Keyring | Profile names and metadata |
-| API tokens | OS Keyring | Encrypted tokens (never plaintext) |
+| Platform | Profile Storage | Active Session | OAuth Support |
+|----------|----------------|----------------|---------------|
+| **macOS** | System Keyring (`claude-profile-manager`) | Keychain (`Claude Code-credentials`) | ✅ Full OAuth with refreshToken + MCP |
+| **Windows** | Credential Manager (DPAPI) | `AppData/Roaming/Claude/.credentials.json` | ⚠️ AccessToken only |
+| **Linux** | Secret Service (libsecret) | `~/.claude/.credentials.json` | ⚠️ AccessToken only |
+
+**macOS Architecture Details:**
+- Profiles: System Keyring stores `{"token": "{OAuth JSON}", "metadata": {...}}`
+- Active: Keychain stores raw OAuth JSON via `security add-generic-password`
+- Result: No credential files on disk, complete OAuth preservation
 
 **Environment Variables:**
 
@@ -418,7 +476,22 @@ Options:
 claude-profile doctor
 ```
 
-Checks keyring availability, credential file permissions, profile integrity, and common configuration issues.
+Checks keyring availability, authentication storage, profile integrity, and common configuration issues.
+
+**Example Output (macOS):**
+```
+Keyring Check:
+✓ Keyring accessible: keyring.backends.macOS.Keyring
+
+Active Token Check:
+⚠ Token file does not exist: ~/.claude/.credentials.json
+✓ Token found in macOS Keychain (OAuth authentication)
+
+Profiles Check:
+✓ Found 3 profiles
+```
+
+The warning about missing file is **normal on macOS** - authentication is stored in Keychain, not files.
 
 ## Troubleshooting
 
@@ -460,12 +533,20 @@ claude-profile list
 # Check current profile
 claude-profile current
 
+# Run diagnostics
+claude-profile doctor
+
 # Force switch
 claude-profile switch <name>
 
-# Verify credential file
+# Verify authentication (macOS)
+security find-generic-password -s "Claude Code-credentials" -w | python3 -c "import sys,json; print(json.loads(sys.stdin.read()).get('claudeAiOauth',{}).get('accessToken','')[:50])"
+
+# Verify authentication (Linux/Windows)
 cat ~/.claude/.credentials.json
 ```
+
+**macOS Note:** If `doctor` shows "Token found in macOS Keychain" but Claude Code doesn't authenticate, restart Claude Code to reload Keychain credentials.
 
 ## Development
 

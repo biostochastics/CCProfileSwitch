@@ -13,21 +13,69 @@ from .theme import console, get_icon, should_use_rich
 
 
 def mask_token(token: str, visible_chars: int = 4) -> str:
-    """Mask a token, showing only the first few characters."""
-    if not token or len(token) <= visible_chars:
-        return "*" * len(token) if token else ""
+    """Mask a token, showing only the first few characters.
+
+    Handles both plain tokens and OAuth JSON structures.
+    """
+    import json
+
+    if not token:
+        return ""
+
+    # Check if it's OAuth JSON
+    try:
+        data = json.loads(token)
+        if "claudeAiOauth" in data:
+            # Mask the accessToken in OAuth JSON
+            access_token = data["claudeAiOauth"].get("accessToken", "")
+            if access_token:
+                masked = access_token[:visible_chars] + "*" * (
+                    len(access_token) - visible_chars
+                )
+                return f"OAuth: {masked} (with refreshToken)"
+            return "OAuth structure (no accessToken)"
+        elif "token" in data:
+            # Wrapped token format
+            inner_token = data["token"]
+            return mask_token(inner_token, visible_chars)
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Plain token
+    if len(token) <= visible_chars:
+        return "*" * len(token)
     return token[:visible_chars] + "*" * (len(token) - visible_chars)
 
 
 def validate_token(token: str) -> bool:
-    """Validate Claude API token format (sk-ant-* pattern)."""
+    """Validate Claude API token format (sk-ant-* pattern).
+
+    Accepts both plain tokens and OAuth JSON structures.
+    """
+    import json
+
     if not token:
         return False
-    # Claude tokens follow the pattern: sk-ant-{identifier}-{key}
-    # Example: sk-ant-api03-xxxxx...
+
+    # Check if it's OAuth JSON
+    try:
+        data = json.loads(token)
+        if "claudeAiOauth" in data:
+            # Validate OAuth structure has required fields
+            oauth = data["claudeAiOauth"]
+            has_access = "accessToken" in oauth and oauth["accessToken"]
+            has_refresh = "refreshToken" in oauth
+            return has_access and has_refresh
+        elif "token" in data:
+            # Wrapped token - validate inner token
+            return validate_token(data["token"])
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Plain token validation
+    # Claude tokens: sk-ant-{type}-{key} where type is api03, oat01, ort01, etc.
     if len(token) < 20:
         return False
-    # Enforce Claude-specific token format (minimum 7 chars after second hyphen)
     return bool(re.match(r"^sk-ant-[a-zA-Z0-9]{4,}-[a-zA-Z0-9\-_]{7,}$", token))
 
 
@@ -202,7 +250,12 @@ def format_timestamp(timestamp: Optional[str]) -> str:
 
 
 def detect_current_token() -> Optional[str]:
-    """Try to detect the current Claude token from OS-specific locations."""
+    """Try to detect the current Claude token from OS-specific locations.
+
+    Returns the complete OAuth JSON structure for OAuth tokens, or plain token string.
+    For OAuth: returns the full JSON string with accessToken, refreshToken, etc.
+    For plain API keys: returns just the token string.
+    """
     import json
     import os
     import subprocess
@@ -226,18 +279,9 @@ def detect_current_token() -> Optional[str]:
             )
             keychain_data = result.stdout.strip()
             if keychain_data:
-                # Try to parse as JSON (OAuth format)
-                try:
-                    data = json.loads(keychain_data)
-                    # Extract accessToken from claudeAiOauth
-                    if (
-                        "claudeAiOauth" in data
-                        and "accessToken" in data["claudeAiOauth"]
-                    ):
-                        return data["claudeAiOauth"]["accessToken"]
-                except json.JSONDecodeError:
-                    # Not JSON, return as-is (plain token)
-                    return keychain_data
+                # Return the complete keychain data (OAuth JSON or plain token)
+                # This preserves refreshToken, expiresAt, scopes, mcpOAuth, etc.
+                return keychain_data
         except (subprocess.CalledProcessError, KeyError):
             pass
 

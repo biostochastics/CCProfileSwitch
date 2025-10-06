@@ -110,29 +110,76 @@ class ProfileStorage:
             console.print(f"[red]Error updating profile list: {e}[/red]")
             return False
 
-    def save_active_token(self, token: str, target_path: Optional[str] = None) -> bool:
-        """Save the active token to the specified location."""
+    def save_active_token(
+        self, token: str, target_path: Optional[str] = None
+    ) -> bool:
+        """Save the active token to the specified location.
+
+        For macOS: Writes OAuth JSON to keychain using security command
+        (Claude Code compatible)
+        For Linux/Windows: Writes to file
+
+        Args:
+            token: Either OAuth JSON string or plain token string
+            target_path: Optional file path (used only for non-macOS or when
+                explicitly specified)
+        """
+        import subprocess
+        import sys
+
         try:
-            if target_path:
-                # Use custom target path
-                target = Path(target_path).expanduser()
-                target.parent.mkdir(parents=True, exist_ok=True)
+            # On macOS, write to keychain to be compatible with Claude Code OAuth
+            if sys.platform == "darwin" and not target_path:
+                # Delete existing keychain entry
+                subprocess.run(
+                    [
+                        "security",
+                        "delete-generic-password",
+                        "-a",
+                        os.environ.get("USER", ""),
+                        "-s",
+                        "Claude Code-credentials",
+                    ],
+                    capture_output=True,
+                )
+
+                # Add new keychain entry with OAuth data
+                result = subprocess.run(
+                    [
+                        "security",
+                        "add-generic-password",
+                        "-a",
+                        os.environ.get("USER", ""),
+                        "-s",
+                        "Claude Code-credentials",
+                        "-w",
+                        token,
+                    ],
+                    capture_output=True,
+                    check=True,
+                )
+                return result.returncode == 0
             else:
-                # Use default location
-                self.ensure_config_dir()
-                target = self.credentials_file
+                # File-based storage for Linux/Windows or explicit path
+                if target_path:
+                    target = Path(target_path).expanduser()
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                else:
+                    self.ensure_config_dir()
+                    target = self.credentials_file
 
-            # Write atomically
-            with tempfile.NamedTemporaryFile(
-                "w", dir=str(target.parent), delete=False
-            ) as tmp_file:
-                json.dump({"token": token}, tmp_file)
-                temp_path = Path(tmp_file.name)
-            temp_path.replace(target)
+                # Write atomically
+                with tempfile.NamedTemporaryFile(
+                    "w", dir=str(target.parent), delete=False
+                ) as tmp_file:
+                    # Store as-is (could be OAuth JSON or plain token)
+                    tmp_file.write(token)
+                    temp_path = Path(tmp_file.name)
+                temp_path.replace(target)
 
-            # Set secure permissions (0600)
-            os.chmod(target, stat.S_IRUSR | stat.S_IWUSR)
-            return True
+                # Set secure permissions (0600)
+                os.chmod(target, stat.S_IRUSR | stat.S_IWUSR)
+                return True
         except Exception as e:
             console.print(f"[red]Error saving active token: {e}[/red]")
             return False

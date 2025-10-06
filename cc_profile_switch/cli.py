@@ -1,6 +1,8 @@
 """Main CLI interface for CC Profile Switch."""
 
 import json
+import os
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -209,7 +211,11 @@ def save(
 
         # Set as active if requested
         if set_active:
-            if storage.save_active_token(token, config.get_active_token_path()):
+            # On macOS, don't pass target_path to ensure keychain write
+            target_path = (
+                None if sys.platform == "darwin" else config.get_active_token_path()
+            )
+            if storage.save_active_token(token, target_path):
                 show_success(f"Profile '{name}' is now active")
             else:
                 show_warning("Profile saved but could not set as active")
@@ -270,13 +276,19 @@ def switch(
     profile = profiles[name]
     token = profile["token"]
 
+    # On macOS, don't pass target_path to ensure keychain write
+    # On other platforms, use the configured path
+    import sys
+
+    target_path = None if sys.platform == "darwin" else config.get_active_token_path()
+
     spinner = show_spinner(f"Switching to profile '{name}'...")
     if spinner:
         with spinner:
             time.sleep(0.5)  # Brief delay for visual feedback
-            success = storage.save_active_token(token, config.get_active_token_path())
+            success = storage.save_active_token(token, target_path)
     else:
-        success = storage.save_active_token(token, config.get_active_token_path())
+        success = storage.save_active_token(token, target_path)
 
     if success:
         if current_profile:
@@ -467,17 +479,18 @@ def cycle():
     # Perform the switch
     profile_data = storage.get_profile(next_profile)
     if profile_data:
+        # On macOS, don't pass target_path to ensure keychain write
+        target_path = (
+            None if sys.platform == "darwin" else config.get_active_token_path()
+        )
+
         spinner = show_spinner(f"Switching to '{next_profile}'...")
         if spinner:
             with spinner:
                 time.sleep(0.4)  # Brief animation
-                success = storage.save_active_token(
-                    profile_data["token"], config.get_active_token_path()
-                )
+                success = storage.save_active_token(profile_data["token"], target_path)
         else:
-            success = storage.save_active_token(
-                profile_data["token"], config.get_active_token_path()
-            )
+            success = storage.save_active_token(profile_data["token"], target_path)
 
         if success:
             if current_profile:
@@ -777,9 +790,13 @@ def doctor():
     except Exception as e:
         console.print(f"[red]✗ Config directory error: {e}[/red]")
 
-    # Check active token file
+    # Check active token file and detection
     console.print("\n[bold]Active Token Check:[/bold]")
     token_path = Path(config.get_active_token_path())
+
+    # Try to detect token from any source (keychain, file, env)
+    detected_token = detect_current_token()
+
     if token_path.exists():
         console.print(f"[green]✓ Token file exists: {token_path}[/green]")
         if check_file_permissions(token_path):
@@ -795,6 +812,33 @@ def doctor():
                     console.print("[red]✗ Failed to fix file permissions[/red]")
     else:
         console.print(f"[yellow]⚠ Token file does not exist: {token_path}[/yellow]")
+
+        # Check if token is available from other sources
+        if detected_token:
+            # Determine the actual source based on token format and platform
+            env_token = os.environ.get("ANTHROPIC_API_KEY")
+
+            # Check if detected token is OAuth (starts with sk-ant-oat or sk-ant-ort)
+            is_oauth = detected_token.startswith(
+                "sk-ant-oat"
+            ) or detected_token.startswith("sk-ant-ort")
+
+            if is_oauth and sys.platform == "darwin":
+                console.print(
+                    "[green]✓ Token found in macOS Keychain "
+                    "(OAuth authentication)[/green]"
+                )
+            elif env_token and detected_token == env_token:
+                console.print(
+                    "[green]✓ Token found in ANTHROPIC_API_KEY "
+                    "environment variable[/green]"
+                )
+            elif sys.platform == "darwin":
+                console.print("[green]✓ Token found in macOS Keychain[/green]")
+            else:
+                console.print("[green]✓ Token found from alternative source[/green]")
+        else:
+            console.print("[red]✗ No token detected from any source[/red]")
 
     # Check for existing Claude configurations
     console.print("\n[bold]Existing Claude Configurations:[/bold]")
