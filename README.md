@@ -93,10 +93,11 @@ The `init` command automatically detects your existing Claude Code credentials f
 - **Linux**: `~/.claude/.credentials.json` or platform-specific paths
 - **Windows**: `AppData/Roaming/Claude/.credentials.json` or `AppData/Local/Claude/.credentials.json`
 
-**OAuth Support (macOS):**
-- Preserves complete OAuth session including `refreshToken` for seamless authentication
-- Maintains MCP server OAuth tokens (`mcpOAuth`) for persistent MCP connections
-- Supports both OAuth tokens (`sk-ant-oat*`) and API keys (`sk-ant-api*`)
+**OAuth Support (All Platforms):**
+- ✅ Preserves complete OAuth session including `refreshToken` for seamless authentication
+- ✅ Maintains MCP server OAuth tokens (`mcpOAuth`) for persistent MCP connections
+- ✅ Supports both OAuth tokens (`sk-ant-oat*`, `sk-ant-ort*`) and API keys (`sk-ant-api*`)
+- ✅ Works on macOS (Keychain), Linux (.credentials.json), and Windows (credential files)
 
 After setup, Claude Code immediately uses the active profile's credentials for all requests.
 
@@ -243,12 +244,13 @@ CCProfileSwitch stores authentication credentials in your operating system's sec
 
 **Auto-Detection & OAuth Support:**
 - Automatically detects existing Claude Code credentials on first run
-- **macOS**: Reads complete OAuth structure from Keychain, including:
+- **All Platforms**: Reads complete OAuth structure, including:
   - `accessToken` (sk-ant-oat*) - Active authentication token
   - `refreshToken` (sk-ant-ort*) - Token refresh capability
   - `expiresAt`, `scopes`, `subscriptionType` - Session metadata
   - `mcpOAuth` - MCP server authentication tokens
-- **Linux/Windows**: Reads from credential files or platform-specific paths
+- **macOS**: Reads from Keychain service `Claude Code-credentials`
+- **Linux/Windows**: Reads from credential files (`~/.claude/.credentials.json`, etc.)
 - Supports both OAuth tokens and API keys (sk-ant-api*)
 
 **What's Protected:**
@@ -256,11 +258,11 @@ CCProfileSwitch stores authentication credentials in your operating system's sec
 - Concurrent access protected by file locking (5-second timeout)
 - Token format validation enforces `sk-ant-*` pattern
 - Atomic writes prevent partial credential updates
-- macOS: Complete OAuth structure preserved (never loses refresh tokens)
+- **All Platforms**: Complete OAuth structure preserved (never loses refresh tokens or MCP auth)
 
 **What's Not Protected:**
-- **macOS**: All credentials stay in Keychain (maximum security)
-- **Linux/Windows**: Active credential file contains plaintext for Claude Code compatibility
+- **macOS**: All credentials stay in Keychain (maximum security - no plaintext files)
+- **Linux/Windows**: Active credential file contains plaintext OAuth JSON for Claude Code compatibility (0600 permissions)
 - Exported backups with `--include-tokens` flag contain plaintext tokens (user must encrypt)
 
 For shared or multi-user systems, verify security with `claude-profile doctor`. Each user's credential storage is isolated.
@@ -288,8 +290,8 @@ CCProfileSwitch requires minimal configuration. The tool automatically detects y
 | Platform | Profile Storage | Active Session | OAuth Support |
 |----------|----------------|----------------|---------------|
 | **macOS** | System Keyring (`claude-profile-manager`) | Keychain (`Claude Code-credentials`) | ✅ Full OAuth with refreshToken + MCP |
-| **Windows** | Credential Manager (DPAPI) | `AppData/Roaming/Claude/.credentials.json` | ⚠️ AccessToken only |
-| **Linux** | Secret Service (libsecret) | `~/.claude/.credentials.json` | ⚠️ AccessToken only |
+| **Windows** | Credential Manager (DPAPI) | `AppData/Roaming/Claude/.credentials.json` | ✅ Full OAuth with refreshToken + MCP |
+| **Linux** | Secret Service (libsecret) | `~/.claude/.credentials.json` | ✅ Full OAuth with refreshToken + MCP |
 
 **macOS Architecture Details:**
 - Profiles: System Keyring stores `{"token": "{OAuth JSON}", "metadata": {...}}`
