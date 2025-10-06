@@ -49,6 +49,7 @@ def fzf_select_profile(
         fzf_input.append(f"{name}|{token_display}|{description}|{created}")
 
     # Prepare fzf command
+    # Note: Preview feature removed to prevent command injection via user metadata
     fzf_cmd = [
         "fzf",
         "--delimiter",
@@ -63,12 +64,6 @@ def fzf_select_profile(
         "40%",
         "--prompt",
         "Profile> ",
-        "--preview",
-        "echo 'Token: {2}\\nDescription: {3}\\nCreated: {4}'",
-        "--preview-window",
-        "down:3:wrap",
-        "--bind",
-        "ctrl-r:reload(echo 'Name|Token|Description|Created')",
         "--bind",
         "ctrl-c:abort",
     ]
@@ -124,6 +119,7 @@ def fzf_select_multiple(
         fzf_input.append(f"{name}|{token_display}|{description}")
 
     # Prepare fzf command for multiple selection
+    # Note: Preview feature removed to prevent command injection via user metadata
     fzf_cmd = [
         "fzf",
         "--delimiter",
@@ -139,10 +135,6 @@ def fzf_select_multiple(
         "40%",
         "--prompt",
         "Profiles> ",
-        "--preview",
-        "echo 'Token: {2}\\nDescription: {3}'",
-        "--preview-window",
-        "down:2:wrap",
     ]
 
     # Add header

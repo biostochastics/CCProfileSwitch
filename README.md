@@ -2,7 +2,7 @@
 
 **Switch between Claude Code profiles in seconds—without context mistakes or credential exposure.**
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/biostochastics/CCProfileSwitch) [![Python Version](https://img.shields.io/badge/python-3.8.1%2B-blue)](https://www.python.org/downloads/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Typer](https://img.shields.io/badge/CLI-typer-green)](https://typer.tiangolo.com/) [![Rich](https://img.shields.io/badge/UI-rich-orange)](https://rich.readthedocs.io/) [![Keyring](https://img.shields.io/badge/security-keyring-red)](https://github.com/jaraco/keyring) [![DeepWiki](https://img.shields.io/badge/DeepWiki-docs-purple)](https://deepwiki.com/biostochastics/CCProfileSwitch)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/biostochastics/CCProfileSwitch) [![Python Version](https://img.shields.io/badge/python-3.8.1%2B-blue)](https://www.python.org/downloads/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![pipx](https://img.shields.io/badge/install-pipx-brightgreen)](https://pipx.pypa.io/) [![Typer](https://img.shields.io/badge/CLI-typer-green)](https://typer.tiangolo.com/) [![Rich](https://img.shields.io/badge/UI-rich-orange)](https://rich.readthedocs.io/) [![Keyring](https://img.shields.io/badge/security-keyring-red)](https://github.com/jaraco/keyring) [![DeepWiki](https://img.shields.io/badge/DeepWiki-docs-purple)](https://deepwiki.com/biostochastics/CCProfileSwitch)
 
 ## Why CCProfileSwitch?
 
@@ -46,12 +46,18 @@ git clone https://github.com/biostochastics/CCProfileSwitch.git
 cd CCProfileSwitch
 pipx install .
 
-# Initialize - auto-detects and imports your current token
+# Initialize - auto-detects and imports your current token as 'default' profile
 claude-profile init
 
-# Save additional profiles (auto-detects current token or prompts)
+# Save additional profiles with different tokens
+# Method 1: Let it auto-detect current token (if you've switched in Claude Code)
 claude-profile save work
-claude-profile save personal
+
+# Method 2: Provide token explicitly
+claude-profile save personal --token sk-ant-...
+
+# Method 3: Will prompt for token interactively
+claude-profile save client-a
 
 # Switch between profiles
 claude-profile switch work

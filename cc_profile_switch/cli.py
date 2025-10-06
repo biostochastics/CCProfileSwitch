@@ -146,10 +146,10 @@ def init(
 def save(
     name: str = typer.Argument(..., help="Profile name to save"),
     token: Optional[str] = typer.Option(
-        None, "--token", "-t", help="Claude token (will prompt if not provided)"
+        None, "--token", help="Claude token (will prompt if not provided)"
     ),
     description: Optional[str] = typer.Option(
-        None, "--description", "-d", help="Profile description"
+        None, "--description", help="Profile description"
     ),
     set_active: bool = typer.Option(
         True, "--active/--no-active", help="Set as active profile after saving"
