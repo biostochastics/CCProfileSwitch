@@ -12,7 +12,7 @@ The tool integrates directly with Claude Code's authentication system:
 - **macOS**: Writes complete OAuth credentials (including refresh tokens) to macOS Keychain, preserving MCP server authentication
 - **Linux/Windows**: Updates credential files that Claude Code monitors
 
-When you switch profiles, Claude Code immediately uses the new authentication for subsequent requests—no restart required, no manual re-login, no lost MCP connections.
+**Important:** Profile switching requires closing and restarting Claude Code to load the new credentials. This is not a mid-session operation—you must exit Claude Code, run `claude-profile switch <name>`, then start Claude Code again.
 
 Whether you're switching between client accounts, separating personal and work usage, or managing team credentials, CCProfileSwitch handles the mechanics so you can focus on your actual work.
 
@@ -41,12 +41,14 @@ On first run, it automatically detects your existing Claude Code credentials and
 # Morning: Start with client-a work
 $ claude-profile switch client-a
 ✔ Switched to profile 'client-a'
+# Now close and restart Claude Code to use client-a credentials
 
 # Run Claude Code tasks for client-a...
 
-# Afternoon: Switch to personal projects
+# Afternoon: Switch to personal projects (while Claude Code is closed)
 $ claude-profile switch personal
 ✔ Switched to profile 'personal'
+# Now start Claude Code to use personal credentials
 
 # Confirm active context
 $ claude-profile current
@@ -101,7 +103,7 @@ The `init` command automatically detects your existing Claude Code credentials f
 
 > **Note**: OAuth preservation has been verified on macOS. Linux/Windows OAuth support is implemented and should work correctly, but has not been tested on those platforms yet. Please report any issues!
 
-After setup, Claude Code immediately uses the active profile's credentials for all requests.
+After setup, you must close and restart Claude Code to use the active profile's credentials.
 
 ## Common Workflows
 
@@ -116,28 +118,31 @@ $ claude-profile current
 
 If you need to switch, use `claude-profile switch <name>` or `claude-profile cycle` to rotate through profiles. The `list` command shows all available profiles with the active one highlighted.
 
-### Mid-Task Context Switch
+### Context Switching Between Tasks
 
-When you need to temporarily switch contexts for a specific task:
+When you need to switch contexts for a different task:
 
 ```bash
-# Check current context
+# Check current context (while Claude Code is closed)
 $ claude-profile current
 
-# Switch to temporary context
+# Switch to different context
 $ claude-profile switch client-b
+# Now start Claude Code to use client-b credentials
 
 # Perform task with Claude Code...
+# Close Claude Code when done
 
-# Return to default
+# Return to default context
 $ claude-profile switch work
+# Start Claude Code again to use work credentials
 ```
 
 Each switch updates Claude Code's authentication storage atomically:
 - **macOS**: Updates Keychain entry (no file modification)
 - **Linux/Windows**: Updates `~/.claude/.credentials.json`
 
-Claude Code detects the change immediately, so your next request uses the correct credentials.
+**You must close and restart Claude Code after switching** for the new credentials to take effect.
 
 ### Managing Multiple Clients
 
@@ -552,7 +557,7 @@ security find-generic-password -s "Claude Code-credentials" -w | python3 -c "imp
 cat ~/.claude/.credentials.json
 ```
 
-**macOS Note:** If `doctor` shows "Token found in macOS Keychain" but Claude Code doesn't authenticate, restart Claude Code to reload Keychain credentials.
+**macOS Note:** If `doctor` shows "Token found in macOS Keychain" but Claude Code doesn't authenticate, close and restart Claude Code to reload the Keychain credentials.
 
 ## Development
 
