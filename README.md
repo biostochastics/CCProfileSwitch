@@ -1,8 +1,91 @@
 # CCProfileSwitch
 
-**Switch between Claude Code profiles in seconds—without context mistakes or credential exposure.**
+**Switch between Claude Code and Z-AI profiles securely—manage multiple AI providers with isolated configurations.**
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/biostochastics/CCProfileSwitch) [![Python Version](https://img.shields.io/badge/python-3.8.1%2B-blue)](https://www.python.org/downloads/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![pipx](https://img.shields.io/badge/install-pipx-brightgreen)](https://pipx.pypa.io/) [![Typer](https://img.shields.io/badge/CLI-typer-green)](https://typer.tiangolo.com/) [![Rich](https://img.shields.io/badge/UI-rich-orange)](https://rich.readthedocs.io/) [![Keyring](https://img.shields.io/badge/security-keyring-red)](https://github.com/jaraco/keyring) [![DeepWiki](https://img.shields.io/badge/DeepWiki-docs-purple)](https://deepwiki.com/biostochastics/CCProfileSwitch)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue)](https://github.com/biostochastics/CCProfileSwitch) [![Python Version](https://img.shields.io/badge/python-3.8.1%2B-blue)](https://www.python.org/downloads/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![pipx](https://img.shields.io/badge/install-pipx-brightgreen)](https://pipx.pypa.io/) [![Typer](https://img.shields.io/badge/CLI-typer-green)](https://typer.tiangolo.com/) [![Rich](https://img.shields.io/badge/UI-rich-orange)](https://rich.readthedocs.io/) [![Keyring](https://img.shields.io/badge/security-keyring-red)](https://github.com/jaraco/keyring) [![DeepWiki](https://img.shields.io/badge/DeepWiki-docs-purple)](https://deepwiki.com/biostochastics/CCProfileSwitch)
+
+## What CCProfileSwitch Does
+
+CCProfileSwitch performs **two simple but essential tasks**:
+
+1. **Secure Credential Storage**: Stores API keys and tokens in your system's native keyring (Keychain on macOS, Credential Manager on Windows, Secret Service on Linux)
+2. **Environment Configuration**: Updates `~/.claude/settings.json` with the correct provider settings for Claude Code
+
+**That's it.** No shell modifications, no environment variable exports, no complex configuration. Just secure storage and settings file management.
+
+##  Z-AI GLM-4.6 Coder Integration 🚀
+
+**NEW**: CCProfileSwitch now supports [Z-AI's GLM-4.6 Coder](https://z.ai/subscribe?utm_campaign=Platform_Ops&_channel_track_key=DaprgHIc) subscription, offering **3× the usage at 1/7 the cost** compared to Claude's standard pricing.
+
+### Quick Setup for Z-AI
+
+```bash
+# 1. Get your Z-AI API key
+# Visit: https://z.ai/manage-apikey/apikey-list
+
+# 2. (Optional) Set environment variable for auto-detection
+export ZAI_API_KEY="your-zai-api-key-here"
+
+# 3. Create Z-AI profile
+claude-profile save zai-glm46 --provider zai
+
+# 4. Switch to Z-AI
+claude-profile switch zai-glm46
+
+# 5. Verify configuration
+claude-profile current
+```
+
+### What Happens Behind the Scenes
+
+When you create a Z-AI profile, CCProfileSwitch:
+1. Stores your Z-AI API key securely in your system keyring
+2. Updates `~/.claude/settings.json` with:
+   ```json
+   {
+     "env": {
+       "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+       "ANTHROPIC_AUTH_TOKEN": "your-zai-api-key"
+     }
+   }
+   ```
+3. Claude Code reads these settings and routes requests to Z-AI's API
+
+### Model Mappings
+
+Z-AI GLM-4.6 automatically maps to Claude Code's model environment variables:
+
+- `ANTHROPIC_DEFAULT_OPUS_MODEL` → `GLM-4.6`
+- `ANTHROPIC_DEFAULT_SONNET_MODEL` → `GLM-4.6`
+- `ANTHROPIC_DEFAULT_HAIKU_MODEL` → `GLM-4.5-Air`
+
+You can customize these in `~/.claude/settings.json` if needed. See [Z-AI's Claude Code documentation](https://docs.z.ai/devpack/tool/claude) for details.
+
+### Provider Isolation (Important)
+
+**Claude and Z-AI profiles are completely isolated and CANNOT be switched between directly.**
+
+Why? Different providers require different API endpoints and configurations. Mixing them would cause authentication failures.
+
+**Correct workflow:**
+```bash
+# Create separate profiles for each provider
+claude-profile save work --provider claude         # Claude profile
+claude-profile save zai-work --provider zai        # Z-AI profile
+
+# Switch within same provider: ✓ Works
+claude-profile switch work
+claude-profile switch personal  # (another Claude profile)
+
+# Switch between providers: ✗ Blocked
+claude-profile switch zai-work  # Error: cannot switch from Claude to Z-AI!
+
+# To use Z-AI, create a new profile and switch to it
+claude-profile save zai-current --provider zai
+claude-profile switch zai-current  # ✓ Now using Z-AI
+```
+
+This isolation ensures your API configurations stay correct and prevents accidental mixing of credentials.
 
 ## Why CCProfileSwitch?
 
