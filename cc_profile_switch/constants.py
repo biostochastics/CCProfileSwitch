@@ -1,0 +1,15 @@
+"""Constants for CC Profile Switch."""
+
+# Providers
+PROVIDER_CLAUDE = "claude"
+PROVIDER_ZAI = "zai"
+
+# API URLs
+ZAI_DEFAULT_API_URL = "https://api.z.ai/api/anthropic"
+
+# Environment variable keys
+ENV_ANTHROPIC_BASE_URL = "ANTHROPIC_BASE_URL"
+ENV_ANTHROPIC_AUTH_TOKEN = "ANTHROPIC_AUTH_TOKEN"
+ENV_ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
+ENV_ZAI_API_KEY = "ZAI_API_KEY"
+ENV_ZHIPUAI_API_KEY = "ZHIPUAI_API_KEY"

@@ -13,6 +13,13 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
 from .config import Config
+from .constants import (
+    ENV_ANTHROPIC_AUTH_TOKEN,
+    ENV_ANTHROPIC_BASE_URL,
+    PROVIDER_CLAUDE,
+    PROVIDER_ZAI,
+    ZAI_DEFAULT_API_URL,
+)
 from .fzf_integration import (
     check_fzf_available,
     fzf_select_profile,
@@ -148,10 +155,19 @@ def init(
 def save(
     name: str = typer.Argument(..., help="Profile name to save"),
     token: Optional[str] = typer.Option(
-        None, "--token", help="Claude token (will prompt if not provided)"
+        None, "--token", "-t", help="API token (will prompt if not provided)"
     ),
     description: Optional[str] = typer.Option(
-        None, "--description", help="Profile description"
+        None, "--description", "-d", help="Profile description"
+    ),
+    provider: str = typer.Option(
+        PROVIDER_CLAUDE,
+        "--provider",
+        "-p",
+        help="Provider: claude or zai",
+    ),
+    api_url: Optional[str] = typer.Option(
+        None, "--api-url", help="Custom API URL (defaults to Z-AI for zai provider)"
     ),
     set_active: bool = typer.Option(
         True, "--active/--no-active", help="Set as active profile after saving"
@@ -160,11 +176,19 @@ def save(
         False, "--overwrite/--no-overwrite", help="Overwrite existing profile"
     ),
 ):
-    """Save the current or provided token as a named profile."""
+    """Save an API token as a named profile."""
+    from .utils import detect_zai_token, validate_token
+
     show_header("Save Profile", f"Save profile '{name}'")
 
     storage = get_storage()
     config = get_config()
+
+    # Validate provider
+    provider = provider.lower()
+    if provider not in [PROVIDER_CLAUDE, PROVIDER_ZAI]:
+        show_error(f"Invalid provider: {provider}. Use 'claude' or 'zai'")
+        raise typer.Exit(1)
 
     # Check if profile exists
     existing_profile = storage.get_profile(name)
@@ -175,27 +199,47 @@ def save(
             console.print("Operation cancelled.")
             raise typer.Exit()
 
-    # Get token
+    # Get token based on provider
     if not token:
-        token = detect_current_token()
-        if token:
-            show_info(f"Auto-detected current token: {mask_token(token)}")
+        if provider == PROVIDER_ZAI:
+            # Try to detect Z-AI token from environment
+            token = detect_zai_token()
+            if token:
+                show_info(f"Auto-detected Z-AI token from environment")
+            else:
+                show_info("No Z-AI token in environment (ZAI_API_KEY)")
+                token = Prompt.ask("Enter your Z-AI API key", password=True)
         else:
-            show_warning("No current token detected - please enter manually")
-            token = Prompt.ask("Enter your Claude token", password=True)
+            # Claude: try existing detection
+            token = detect_current_token()
+            if token:
+                show_info(f"Auto-detected current token: {mask_token(token)}")
+            else:
+                show_warning("No current token detected - please enter manually")
+                token = Prompt.ask("Enter your Claude token", password=True)
 
-    if not validate_token(token):
-        show_error("Invalid token format")
+    # Validate token
+    is_valid, error_msg = validate_token(token, provider)
+    if not is_valid:
+        show_error(f"Invalid token: {error_msg}")
+        if provider == PROVIDER_ZAI:
+            show_info("Z-AI tokens should be at least 20 characters with no whitespace")
+        else:
+            show_info("Claude tokens should start with 'sk-' and be at least 20 characters")
         raise typer.Exit(1)
+
+    # Set API URL
+    if provider == PROVIDER_ZAI and not api_url:
+        api_url = ZAI_DEFAULT_API_URL
 
     # Save profile
     metadata = {
         "created": datetime.now().isoformat(),
         "description": description
-        or f"Profile saved on {datetime.now().strftime('%Y-%m-%d')}",
+        or f"{provider.upper()} profile saved on {datetime.now().strftime('%Y-%m-%d')}",
     }
 
-    if storage.save_profile(name, token, metadata):
+    if storage.save_profile(name, token, metadata, provider=provider, api_url=api_url):
         # Update profile list - get existing profiles and add the new one
         existing_profiles = storage.list_profiles()
         if existing_profiles and hasattr(existing_profiles, "keys"):
@@ -207,18 +251,30 @@ def save(
             all_profile_names.append(name)
         storage.update_profile_list(all_profile_names)
 
-        show_success(f"Profile '{name}' saved successfully")
+        console.print(f"[green]✓ Profile '{name}' saved successfully[/green]")
+        console.print(f"  Provider: [cyan]{provider.upper()}[/cyan]")
+        if api_url:
+            console.print(f"  API URL: [dim]{api_url}[/dim]")
 
         # Set as active if requested
         if set_active:
-            # On macOS, don't pass target_path to ensure keychain write
-            target_path = (
-                None if sys.platform == "darwin" else config.get_active_token_path()
-            )
-            if storage.save_active_token(token, target_path):
-                show_success(f"Profile '{name}' is now active")
+            # Update Claude settings.json with appropriate environment variables
+            if provider == PROVIDER_ZAI:
+                env_update = {
+                    ENV_ANTHROPIC_BASE_URL: api_url or ZAI_DEFAULT_API_URL,
+                    ENV_ANTHROPIC_AUTH_TOKEN: token,
+                }
+                if config.update_claude_settings(env_update):
+                    show_success(f"Profile '{name}' is now active (Z-AI configured)")
+                else:
+                    show_warning("Profile saved but could not update settings.json")
             else:
-                show_warning("Profile saved but could not set as active")
+                # Claude: set token, remove base URL
+                env_update = {ENV_ANTHROPIC_AUTH_TOKEN: token}
+                if config.update_claude_settings(env_update, remove_keys=[ENV_ANTHROPIC_BASE_URL]):
+                    show_success(f"Profile '{name}' is now active (Claude configured)")
+                else:
+                    show_warning("Profile saved but could not update settings.json")
     else:
         show_error(f"Failed to save profile '{name}'")
         raise typer.Exit(1)
@@ -235,7 +291,9 @@ def switch(
     ),
 ):
     """Switch to a different profile (interactive if no name provided)."""
-    show_header("Profile Switch", "Switch between Claude profiles")
+    from .utils import detect_current_provider
+
+    show_header("Profile Switch", "Switch between provider profiles")
 
     storage = get_storage()
     config = get_config()
@@ -245,14 +303,9 @@ def switch(
         show_error("No profiles found. Use 'claude-profile save' to create one.")
         raise typer.Exit(1)
 
-    # Get current profile for transition display
-    active_token = storage.get_active_token(config.get_active_token_path())
-    current_profile = None
-    if active_token:
-        for pname, pdata in profiles.items():
-            if pdata["token"] == active_token:
-                current_profile = pname
-                break
+    # Detect current provider
+    current_info = detect_current_provider()
+    current_provider_name = current_info.get("provider", PROVIDER_CLAUDE)
 
     # Get profile name
     if not name:
@@ -272,42 +325,72 @@ def switch(
         show_error(f"Profile '{name}' not found")
         raise typer.Exit(1)
 
-    # Switch profile with spinner
+    # Get target profile
     profile = profiles[name]
+    target_provider = profile.get("provider", PROVIDER_CLAUDE)
+
+    # CRITICAL: Check provider compatibility
+    if current_info.get("token_present") and current_provider_name != target_provider:
+        show_error(
+            f"Cannot switch between {current_provider_name.upper()} and "
+            f"{target_provider.upper()} profiles!"
+        )
+        console.print()
+        console.print("[yellow]Provider switching requires reconfiguration:[/yellow]")
+        console.print(f"  Current provider: {current_provider_name.upper()}")
+        console.print(f"  Target provider:  {target_provider.upper()}")
+        console.print()
+        console.print("[dim]Different providers use different API endpoints.")
+        console.print("Create a new profile for the target provider instead:[/dim]")
+        console.print()
+        console.print(f"  claude-profile save {name}_new --provider {target_provider}")
+        raise typer.Exit(1)
+
+    # Perform the switch
     token = profile["token"]
-
-    # On macOS, don't pass target_path to ensure keychain write
-    # On other platforms, use the configured path
-    import sys
-
-    target_path = None if sys.platform == "darwin" else config.get_active_token_path()
+    api_url = profile.get("api_url")
 
     spinner = show_spinner(f"Switching to profile '{name}'...")
     if spinner:
         with spinner:
             time.sleep(0.5)  # Brief delay for visual feedback
-            success = storage.save_active_token(token, target_path)
+            # Update settings.json based on provider
+            if target_provider == PROVIDER_ZAI:
+                env_update = {
+                    ENV_ANTHROPIC_BASE_URL: api_url or ZAI_DEFAULT_API_URL,
+                    ENV_ANTHROPIC_AUTH_TOKEN: token,
+                }
+                success = config.update_claude_settings(env_update)
+            else:
+                # Claude: set token, remove base URL
+                env_update = {ENV_ANTHROPIC_AUTH_TOKEN: token}
+                success = config.update_claude_settings(
+                    env_update, remove_keys=[ENV_ANTHROPIC_BASE_URL]
+                )
     else:
-        success = storage.save_active_token(token, target_path)
+        if target_provider == PROVIDER_ZAI:
+            env_update = {
+                ENV_ANTHROPIC_BASE_URL: api_url or ZAI_DEFAULT_API_URL,
+                ENV_ANTHROPIC_AUTH_TOKEN: token,
+            }
+            success = config.update_claude_settings(env_update)
+        else:
+            env_update = {ENV_ANTHROPIC_AUTH_TOKEN: token}
+            success = config.update_claude_settings(
+                env_update, remove_keys=[ENV_ANTHROPIC_BASE_URL]
+            )
 
     if success:
-        if current_profile:
-            show_transition(current_profile, name)
         show_success(f"Switched to profile '{name}'")
-
-        # Show profile info in a panel
-        metadata = profile.get("metadata", {})
-        token_display = token if show_tokens else mask_token(token)
-        info = (
-            f"[dim]Description:[/dim] {metadata.get('description', 'No description')}\n"
-            f"[dim]Created:[/dim] {format_timestamp(metadata.get('created'))}\n"
-            f"[dim]Token:[/dim] {token_display}"
+        console.print(f"  Provider: [cyan]{target_provider.upper()}[/cyan]")
+        if api_url:
+            console.print(f"  API URL: [dim]{api_url}[/dim]")
+        console.print()
+        console.print("[dim]Environment updated in ~/.claude/settings.json[/dim]")
+        console.print()
+        console.print(
+            "[yellow]Note:[/yellow] Restart Claude Code to use the new configuration"
         )
-        if should_use_rich():
-            panel = create_panel(info, title=f"Profile: {name}", border_style="success")
-            console.print(panel)
-        else:
-            console.print(info)
     else:
         show_error(f"Failed to switch to profile '{name}'")
         raise typer.Exit(1)

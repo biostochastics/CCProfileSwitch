@@ -7,6 +7,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from .constants import PROVIDER_CLAUDE, PROVIDER_ZAI, ZAI_DEFAULT_API_URL
+
 try:
     from platformdirs import user_config_dir as platform_user_config_dir
 except ImportError:  # pragma: no cover - fallback for minimal environments
@@ -39,12 +41,47 @@ class ProfileStorage:
         """Ensure the configuration directory exists."""
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
+    def _normalize_profile(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize profile data with defaults for backward compatibility."""
+        # Set default provider if missing
+        profile.setdefault("provider", PROVIDER_CLAUDE)
+
+        # Set default API URL for Z-AI profiles
+        if profile["provider"] == PROVIDER_ZAI:
+            profile.setdefault("api_url", ZAI_DEFAULT_API_URL)
+
+        return profile
+
     def save_profile(
-        self, name: str, token: str, metadata: Optional[Dict[str, Any]] = None
+        self,
+        name: str,
+        token: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        provider: str = PROVIDER_CLAUDE,
+        api_url: Optional[str] = None,
     ) -> bool:
-        """Save a profile to the keyring."""
+        """Save a profile to the keyring.
+
+        Args:
+            name: Profile name
+            token: API key or auth token
+            metadata: Optional metadata dictionary
+            provider: Provider name ("claude" or "zai")
+            api_url: Optional API URL (defaults to Z-AI URL for zai provider)
+        """
         try:
-            profile_data = {"token": token, "metadata": metadata or {}}
+            profile_data = {
+                "token": token,
+                "provider": provider,
+                "metadata": metadata or {},
+            }
+
+            # Add API URL for Z-AI or custom
+            if provider == PROVIDER_ZAI:
+                profile_data["api_url"] = api_url or ZAI_DEFAULT_API_URL
+            elif api_url:
+                profile_data["api_url"] = api_url
+
             keyring.set_password(
                 self.service_name, f"profile_{name}", json.dumps(profile_data)
             )
@@ -58,7 +95,8 @@ class ProfileStorage:
         try:
             data = keyring.get_password(self.service_name, f"profile_{name}")
             if data:
-                return json.loads(data)
+                profile = json.loads(data)
+                return self._normalize_profile(profile)
             return None
         except Exception as e:
             console.print(f"[red]Error retrieving profile '{name}': {e}[/red]")
@@ -88,7 +126,8 @@ class ProfileStorage:
                 for name in profile_names:
                     profile = self.get_profile(name)
                     if profile:
-                        profiles[name] = profile
+                        # Normalize for backward compatibility
+                        profiles[name] = self._normalize_profile(profile)
         except Exception as e:
             console.print(f"[red]Error listing profiles: {e}[/red]")
         return profiles
