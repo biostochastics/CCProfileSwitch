@@ -684,6 +684,7 @@ def import_profiles(
 
         # Import profiles
         imported_count = 0
+        imported_names = []
         for name, data in import_data.items():
             profile_name = f"{prefix}{name}" if prefix else name
 
@@ -717,13 +718,20 @@ def import_profiles(
 
             if storage.save_profile(profile_name, token, metadata):
                 imported_count += 1
+                imported_names.append(profile_name)
                 console.print(f"[green]Imported: {profile_name}[/green]")
             else:
                 show_error(f"Failed to import: {profile_name}")
 
-        # Update profile list
+        # Update profile list - include both existing and newly imported profiles
         profiles = storage.list_profiles()
-        storage.update_profile_list([k for k in profiles.keys()] if profiles else [])
+        # Use list comprehension instead of list() to avoid shadowing by list command
+        all_profile_names = [k for k in profiles.keys()] if profiles else []
+        # Add newly imported profiles that aren't already in the list
+        for name in imported_names:
+            if name and name not in all_profile_names:
+                all_profile_names.append(name)
+        storage.update_profile_list(all_profile_names)
 
         show_success(f"Imported {imported_count} profiles")
 
