@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "cc-profile-switch"
-version = "0.1.0"
-description = "A cross-platform Claude profile manager with Typer and Rich"
+version = "0.2.0"
+description = "Multi-provider Claude Code & Z-AI profile manager with secure credential storage"
 authors = ["Claude Profile Manager"]
 readme = "README.md"
 packages = [{include = "cc_profile_switch"}]
