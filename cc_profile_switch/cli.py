@@ -408,8 +408,10 @@ def list(
         False, "--active-only", help="Show only the active profile"
     ),
 ):
-    """List all saved profiles."""
-    show_header("Profile List", "View all saved Claude profiles")
+    """List all saved profiles grouped by provider."""
+    from .utils import detect_current_provider
+
+    show_header("Profile List", "View all saved profiles")
 
     storage = get_storage()
     config = get_config()
@@ -417,21 +419,26 @@ def list(
     profiles = storage.list_profiles()
     if not profiles:
         show_info("No profiles found")
+        show_info("Create your first profile:")
+        console.print("  • Claude: [cyan]claude-profile save <name> --provider claude[/cyan]")
+        console.print("  • Z-AI:   [cyan]claude-profile save <name> --provider zai[/cyan]")
         return
 
-    # Get active token
-    active_token = storage.get_active_token(config.get_active_token_path())
-    active_profile = None
+    # Detect active from settings.json
+    current_info = detect_current_provider()
+    env_vars = config.get_claude_settings_env()
+    active_token = env_vars.get(ENV_ANTHROPIC_AUTH_TOKEN)
+    active_profile_name = None
 
     if active_token:
         for name, data in profiles.items():
-            if data["token"] == active_token:
-                active_profile = name
+            if data.get("token") == active_token:
+                active_profile_name = name
                 break
 
-    if active_only and active_profile:
-        profiles = {active_profile: profiles[active_profile]}
-    elif active_only and not active_profile:
+    if active_only and active_profile_name:
+        profiles = {active_profile_name: profiles[active_profile_name]}
+    elif active_only and not active_profile_name:
         show_info("No active profile found")
         return
 
@@ -439,68 +446,163 @@ def list(
         output = {}
         for name, data in profiles.items():
             output[name] = {
+                "provider": data.get("provider", PROVIDER_CLAUDE),
+                "api_url": data.get("api_url"),
                 "token": data["token"] if show_tokens else mask_token(data["token"]),
                 "metadata": data.get("metadata", {}),
-                "active": name == active_profile,
+                "active": name == active_profile_name,
             }
         console.print(json.dumps(output, indent=2))
     else:
-        table = create_profile_table(profiles, show_tokens, active_profile)
-        if active_profile:
-            active_icon = get_icon("active")
-            console.print(
-                f"[success]{active_icon} Active profile: "
-                f"[bold]{active_profile}[/bold][/success]"
-            )
+        # Group profiles by provider
+        claude_profiles = {}
+        zai_profiles = {}
+
+        for name, data in profiles.items():
+            provider = data.get("provider", PROVIDER_CLAUDE)
+            if provider == PROVIDER_ZAI:
+                zai_profiles[name] = data
+            else:
+                claude_profiles[name] = data
+
+        # Display Claude profiles
+        if claude_profiles:
+            console.print("[bold cyan]=== Claude Profiles ===[/bold cyan]\n")
+            table = create_profile_table(claude_profiles, show_tokens, active_profile_name)
+            console.print(table)
             console.print()
-        console.print(table)
+
+        # Display Z-AI profiles
+        if zai_profiles:
+            console.print("[bold magenta]=== Z-AI Profiles ===[/bold magenta]\n")
+            # Create Z-AI specific table with API URL column
+            from rich.table import Table
+            from rich import box
+
+            table = Table(
+                box=box.MINIMAL_HEAVY_HEAD,
+                row_styles=["", "dim"] if should_use_rich() else None,
+                show_header=True,
+                header_style="bold cyan",
+            )
+
+            active_icon = get_icon("active")
+            table.add_column("", style="accent", width=3)
+            table.add_column("Name", style="magenta")
+            table.add_column("Description", style="blue")
+            table.add_column("API URL", style="green")
+            table.add_column("Created", style="yellow")
+
+            for name, data in zai_profiles.items():
+                is_active = name == active_profile_name
+                indicator = active_icon if is_active else ""
+                api_url = data.get("api_url", ZAI_DEFAULT_API_URL)
+                metadata = data.get("metadata", {})
+                created = format_timestamp(metadata.get("created", "Unknown"))
+                desc = metadata.get("description", "")
+
+                if is_active and should_use_rich():
+                    table.add_row(
+                        indicator,
+                        f"[bold highlight]{name}[/bold highlight]",
+                        desc,
+                        api_url,
+                        created,
+                        style="highlight",
+                    )
+                else:
+                    table.add_row(indicator, name, desc, api_url, created)
+
+            console.print(table)
+            console.print()
+
+        # Show active profile indicator
+        if active_profile_name:
+            active_profile = profiles[active_profile_name]
+            provider = active_profile.get("provider", PROVIDER_CLAUDE)
+            console.print(
+                f"[success]{get_icon('active')} Active: [bold]{active_profile_name}[/bold] "
+                f"({provider.upper()})[/success]"
+            )
 
 
 @app.command()
 def current():
-    """Show the currently active profile."""
-    show_header("Current Profile", "View active profile details")
+    """Show the currently active provider configuration."""
+    from .utils import detect_current_provider
+
+    show_header("Current Configuration", "View active provider and profile")
 
     storage = get_storage()
     config = get_config()
 
-    active_token = storage.get_active_token(config.get_active_token_path())
-    if not active_token:
-        show_info("No active profile found")
-        return
+    # Detect current provider from settings.json
+    current_info = detect_current_provider()
+    provider = current_info.get("provider", PROVIDER_CLAUDE)
+    base_url = current_info.get("base_url")
+    has_token = current_info.get("token_present", False)
 
-    profiles = storage.list_profiles()
-    active_profile = None
-
-    for name, data in profiles.items():
-        if data["token"] == active_token:
-            active_profile = name
-            break
-
-    if active_profile:
-        profile = profiles[active_profile]
-        metadata = profile.get("metadata", {})
-
+    if not has_token:
         console.print(
             Panel(
-                f"[bold green]Active Profile: {active_profile}[/bold green]\n\n"
-                f"[dim]Description: "
-                f"{metadata.get('description', 'No description')}[/dim]\n"
-                f"[dim]Created: {format_timestamp(metadata.get('created'))}[/dim]\n"
-                f"[dim]Token: {mask_token(active_token)}[/dim]",
-                title="Current Profile",
-                border_style="green",
-            )
-        )
-    else:
-        console.print(
-            Panel(
-                f"[dim]Token: {mask_token(active_token)}[/dim]\n"
-                f"[yellow]This token is not associated with any saved profile[/yellow]",
-                title="Current Token",
+                "[yellow]No active environment configured[/yellow]\n\n"
+                "To get started, create a profile:\n"
+                "  • Claude: [cyan]claude-profile save <name> --provider claude[/cyan]\n"
+                "  • Z-AI:   [cyan]claude-profile save <name> --provider zai[/cyan]",
+                title="No Configuration",
                 border_style="yellow",
             )
         )
+        return
+
+    # Try to match to a saved profile
+    env_vars = config.get_claude_settings_env()
+    active_token = env_vars.get(ENV_ANTHROPIC_AUTH_TOKEN)
+    profiles = storage.list_profiles()
+    active_profile_name = None
+
+    if active_token:
+        for name, data in profiles.items():
+            if data.get("token") == active_token:
+                active_profile_name = name
+                break
+
+    # Build info display
+    info_lines = [
+        f"[bold green]Provider:[/bold green] {provider.upper()}",
+    ]
+
+    if active_profile_name:
+        profile = profiles[active_profile_name]
+        metadata = profile.get("metadata", {})
+        info_lines.append(f"[bold green]Profile:[/bold green] {active_profile_name}")
+        info_lines.append(
+            f"[dim]Description:[/dim] {metadata.get('description', 'No description')}"
+        )
+        info_lines.append(
+            f"[dim]Created:[/dim] {format_timestamp(metadata.get('created'))}"
+        )
+    else:
+        info_lines.append("[yellow]Profile: Not matched to saved profile[/yellow]")
+
+    if base_url:
+        info_lines.append(f"[dim]API URL:[/dim] {base_url}")
+
+    info_lines.append(f"[dim]Token:[/dim] Token configured ✓")
+
+    info_lines.append("")
+    info_lines.append(
+        "[dim italic]Note: To switch providers, create and switch to a profile\n"
+        "of the desired provider type.[/dim italic]"
+    )
+
+    console.print(
+        Panel(
+            "\n".join(info_lines),
+            title="Current Configuration",
+            border_style="green",
+        )
+    )
 
 
 @app.command()
@@ -839,15 +941,31 @@ def show(
         raise typer.Exit(1)
 
     metadata = profile.get("metadata", {})
+    provider = profile.get("provider", PROVIDER_CLAUDE)
+    api_url = profile.get("api_url")
     token_display = profile["token"] if show_token else mask_token(profile["token"])
+
+    info_lines = [
+        f"[bold]Profile: {name}[/bold]",
+        "",
+        f"[bold cyan]Provider:[/bold cyan] {provider.upper()}",
+    ]
+
+    if api_url:
+        info_lines.append(f"[dim]API URL:[/dim] {api_url}")
+
+    info_lines.extend([
+        f"[dim]Token:[/dim] {token_display}",
+        f"[dim]Created:[/dim] {format_timestamp(metadata.get('created'))}",
+        f"[dim]Description:[/dim] {metadata.get('description', 'No description')}",
+    ])
+
+    if metadata.get('imported'):
+        info_lines.append(f"[dim]Imported:[/dim] {format_timestamp(metadata.get('imported'))}")
 
     console.print(
         Panel(
-            f"[bold]Profile: {name}[/bold]\n\n"
-            f"[dim]Token: {token_display}[/dim]\n"
-            f"[dim]Created: {format_timestamp(metadata.get('created'))}[/dim]\n"
-            f"[dim]Description: {metadata.get('description', 'No description')}[/dim]\n"
-            f"[dim]Imported: {format_timestamp(metadata.get('imported'))}[/dim]",
+            "\n".join(info_lines),
             title=f"Profile Details: {name}",
             border_style="blue",
         )
