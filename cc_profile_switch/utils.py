@@ -413,7 +413,8 @@ def detect_current_token() -> Optional[str]:
                                 return data[key]
                     except json.JSONDecodeError:
                         # Not JSON - might be plain token
-                        if content and validate_token(content):
+                        is_valid, _ = validate_token(content) if content else (False, "")
+                        if content and is_valid:
                             return content
             except Exception:
                 continue

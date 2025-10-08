@@ -272,7 +272,7 @@ def test_zai_provider_workflow(runner: CliRunner) -> None:
 
 
 def test_provider_isolation(runner: CliRunner) -> None:
-    """Test that Claude and Z-AI profiles cannot be switched between - macOS compatible."""
+    """Test seamless switching between Claude and Z-AI profiles."""
     claude_token = "sk-ant-test-claude-12345678901234567890123456"
     zai_token = "test-zai-key-123456789012345678901234567890"
 
@@ -290,12 +290,12 @@ def test_provider_isolation(runner: CliRunner) -> None:
         catch_exceptions=False,
     )
 
-    # Try to switch from Claude to Z-AI - should fail
+    # Switch from Claude to Z-AI - should succeed
     switch_result = runner.invoke(app, ["switch", "zai-prof"], catch_exceptions=False)
 
-    # Should error about provider mismatch
-    assert switch_result.exit_code != 0
-    assert "Cannot switch between" in switch_result.stdout
+    # Should succeed with provider switch notification
+    assert switch_result.exit_code == 0
+    assert "Switching from CLAUDE to ZAI" in switch_result.stdout
 
 
 def test_list_groups_by_provider(runner: CliRunner) -> None:
