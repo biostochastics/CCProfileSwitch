@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from cc_profile_switch.cli import app
 from cc_profile_switch.config import Config
+from cc_profile_switch.constants import PROVIDER_ZAI
 from cc_profile_switch.storage import ProfileStorage
 
 
@@ -91,12 +92,12 @@ def test_save_list_and_cycle_flow(runner: CliRunner) -> None:
 
 
 def test_export_masks_tokens_and_import_prompts_for_real_token(
-    runner: CliRunner, tmp_path: Path
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Test export masks tokens and import requires real tokens - macOS compatible."""
     # Use a valid token format
     token_value = "sk-ant-test-exportable-12345678901234567890123456"
-    
+
     result = runner.invoke(
         app, ["save", "exportable", "--token", token_value], catch_exceptions=False
     )
@@ -122,12 +123,16 @@ def test_export_masks_tokens_and_import_prompts_for_real_token(
     )
     assert delete_result.exit_code == 0, delete_result.stdout
 
-    # Import with real token
-    import_input = "y\n" + token_value + "\n"
+    # Mock Rich prompts to avoid hanging on interactive input
+    from rich.prompt import Confirm, Prompt
+
+    monkeypatch.setattr(Confirm, "ask", lambda *args, **kwargs: True)
+    monkeypatch.setattr(Prompt, "ask", lambda *args, **kwargs: token_value)
+
+    # Import - Rich prompts are now mocked
     import_result = runner.invoke(
         app,
         ["import-profiles", str(export_path)],
-        input=import_input,
         catch_exceptions=False,
     )
     assert import_result.exit_code == 0, import_result.stdout
@@ -140,11 +145,70 @@ def test_export_masks_tokens_and_import_prompts_for_real_token(
     assert restored["token"] == token_value
 
 
+def test_export_import_preserves_provider_metadata(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    claude_token = "sk-ant-export-import-claude-1234567890"
+    zai_token = "zai-token-export-import-1234567890abcd"
+    custom_api = "https://custom.z.ai/api/anthropic"
+
+    runner.invoke(
+        app,
+        ["save", "claude-default", "--token", claude_token],
+        catch_exceptions=False,
+    )
+    runner.invoke(
+        app,
+        [
+            "save",
+            "zai-profile",
+            "--token",
+            zai_token,
+            "--provider",
+            PROVIDER_ZAI,
+            "--api-url",
+            custom_api,
+        ],
+        catch_exceptions=False,
+    )
+
+    export_path = tmp_path / "profiles.json"
+    export_result = runner.invoke(
+        app,
+        ["export", str(export_path), "--include-tokens"],
+        catch_exceptions=False,
+    )
+    assert export_result.exit_code == 0, export_result.stdout
+
+    exported_payload = json.loads(export_path.read_text())
+    assert exported_payload["zai-profile"]["provider"] == PROVIDER_ZAI
+    assert exported_payload["zai-profile"]["api_url"] == custom_api
+
+    runner.invoke(
+        app, ["delete", "claude-default", "--no-confirm"], catch_exceptions=False
+    )
+    runner.invoke(
+        app, ["delete", "zai-profile", "--no-confirm"], catch_exceptions=False
+    )
+
+    import_result = runner.invoke(
+        app, ["import-profiles", str(export_path)], catch_exceptions=False
+    )
+    assert import_result.exit_code == 0, import_result.stdout
+
+    storage = ProfileStorage()
+    restored = storage.get_profile("zai-profile")
+    assert restored is not None
+    assert restored["provider"] == PROVIDER_ZAI
+    assert restored.get("api_url") == custom_api
+    assert restored["token"] == zai_token
+
+
 def test_switch_with_show_tokens_displays_unmasked_tokens(runner: CliRunner) -> None:
     """Test switch command shows tokens when requested - macOS compatible."""
     # Use valid token format
     token_value = "sk-ant-test-visual-123456789012345678901234567890"
-    
+
     save_result = runner.invoke(
         app, ["save", "visual", "--token", token_value], catch_exceptions=False
     )
@@ -154,7 +218,7 @@ def test_switch_with_show_tokens_displays_unmasked_tokens(runner: CliRunner) -> 
         app, ["switch", "--show-tokens"], input="1\n", catch_exceptions=False
     )
     assert switch_result.exit_code == 0, switch_result.stdout
-    
+
     # Check that the token prefix is visible (Rich may truncate)
     # We don't check for the exact full token due to terminal width truncation
     assert "sk-ant" in switch_result.stdout
@@ -171,7 +235,7 @@ def test_doctor_reports_config_directory(runner: CliRunner) -> None:
 def test_zai_provider_workflow(runner: CliRunner) -> None:
     """Test Z-AI provider profile creation and management - macOS compatible."""
     zai_token = "test-zai-key-123456789012345678901234567890"
-    
+
     # Save Z-AI profile
     result = runner.invoke(
         app,
@@ -201,9 +265,7 @@ def test_zai_provider_workflow(runner: CliRunner) -> None:
     assert profile["token"] == zai_token
 
     # Show Z-AI profile
-    show_result = runner.invoke(
-        app, ["show", "zai-test"], catch_exceptions=False
-    )
+    show_result = runner.invoke(app, ["show", "zai-test"], catch_exceptions=False)
     assert show_result.exit_code == 0, show_result.stdout
     assert "Provider: ZAI" in show_result.stdout
     assert "https://api.z.ai/api/anthropic" in show_result.stdout
@@ -213,26 +275,24 @@ def test_provider_isolation(runner: CliRunner) -> None:
     """Test that Claude and Z-AI profiles cannot be switched between - macOS compatible."""
     claude_token = "sk-ant-test-claude-12345678901234567890123456"
     zai_token = "test-zai-key-123456789012345678901234567890"
-    
+
     # Create Claude profile and make it active
     runner.invoke(
         app,
         ["save", "claude-prof", "--provider", "claude", "--token", claude_token],
         catch_exceptions=False,
     )
-    
+
     # Create Z-AI profile (not active)
     runner.invoke(
         app,
         ["save", "zai-prof", "--provider", "zai", "--token", zai_token, "--no-active"],
         catch_exceptions=False,
     )
-    
+
     # Try to switch from Claude to Z-AI - should fail
-    switch_result = runner.invoke(
-        app, ["switch", "zai-prof"], catch_exceptions=False
-    )
-    
+    switch_result = runner.invoke(app, ["switch", "zai-prof"], catch_exceptions=False)
+
     # Should error about provider mismatch
     assert switch_result.exit_code != 0
     assert "Cannot switch between" in switch_result.stdout
@@ -242,23 +302,31 @@ def test_list_groups_by_provider(runner: CliRunner) -> None:
     """Test that list command groups profiles by provider - macOS compatible."""
     claude_token = "sk-ant-test-list-claude-1234567890123456789"
     zai_token = "test-zai-list-key-123456789012345678901234567890"
-    
+
     # Create one of each provider
     runner.invoke(
         app,
-        ["save", "list-claude", "--provider", "claude", "--token", claude_token, "--no-active"],
+        [
+            "save",
+            "list-claude",
+            "--provider",
+            "claude",
+            "--token",
+            claude_token,
+            "--no-active",
+        ],
         catch_exceptions=False,
     )
-    
+
     runner.invoke(
         app,
         ["save", "list-zai", "--provider", "zai", "--token", zai_token, "--no-active"],
         catch_exceptions=False,
     )
-    
+
     # List all profiles
     list_result = runner.invoke(app, ["list"], catch_exceptions=False)
-    
+
     assert list_result.exit_code == 0, list_result.stdout
     # Should show both provider sections
     assert "=== Claude Profiles ===" in list_result.stdout

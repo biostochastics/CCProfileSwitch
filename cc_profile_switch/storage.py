@@ -149,9 +149,7 @@ class ProfileStorage:
             console.print(f"[red]Error updating profile list: {e}[/red]")
             return False
 
-    def save_active_token(
-        self, token: str, target_path: Optional[str] = None
-    ) -> bool:
+    def save_active_token(self, token: str, target_path: Optional[str] = None) -> bool:
         """Save the active token to the specified location.
 
         For macOS: Writes OAuth JSON to keychain using security command
@@ -167,8 +165,14 @@ class ProfileStorage:
         import sys
 
         try:
+            force_file_storage = os.getenv("CCPS_FORCE_FILE_STORAGE", "").lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+
             # On macOS, write to keychain to be compatible with Claude Code OAuth
-            if sys.platform == "darwin" and not target_path:
+            if sys.platform == "darwin" and not target_path and not force_file_storage:
                 # Delete existing keychain entry
                 subprocess.run(
                     [
@@ -209,7 +213,7 @@ class ProfileStorage:
 
                 # Write atomically
                 with tempfile.NamedTemporaryFile(
-                    "w", dir=str(target.parent), delete=False
+                    "w", dir=str(target.parent), delete=False, encoding="utf-8"
                 ) as tmp_file:
                     # Store as-is (could be OAuth JSON or plain token)
                     tmp_file.write(token)
@@ -224,19 +228,51 @@ class ProfileStorage:
             return False
 
     def get_active_token(self, target_path: Optional[str] = None) -> Optional[str]:
-        """Get the active token from the specified location."""
+        """Get the active token from the specified location.
+
+        Handles multiple token formats:
+        - Plain string tokens (e.g., 'sk-ant-...')
+        - Legacy JSON format: {"token": "sk-ant-..."}
+        - OAuth JSON format: {"claudeAiOauth": {...}}
+
+        Returns:
+            Token string or None if not found
+        """
         try:
-            if target_path:
-                target = Path(target_path)
-            else:
-                target = self.credentials_file
+            target = (
+                Path(target_path).expanduser() if target_path else self.credentials_file
+            )
 
             if not target.exists():
                 return None
 
-            with open(target, "r") as f:
-                data = json.load(f)
-                return data.get("token")
+            with open(target, "r", encoding="utf-8") as handle:
+                raw_value = handle.read().strip()
+
+            if not raw_value:
+                return None
+
+            # Try to parse as JSON
+            try:
+                parsed = json.loads(raw_value)
+            except json.JSONDecodeError:
+                # Plain token string, return as-is
+                return raw_value
+
+            # Handle different JSON formats
+            if isinstance(parsed, dict):
+                # Legacy format: {"token": "sk-ant-..."}
+                token_value = parsed.get("token")
+                if isinstance(token_value, str):
+                    return token_value
+                # OAuth format: preserve entire JSON structure for Claude Code
+                if "claudeAiOauth" in parsed:
+                    return raw_value
+            elif isinstance(parsed, str):
+                return parsed
+
+            # Fallback: return raw value for any other format
+            return raw_value
         except Exception as e:
             console.print(f"[red]Error reading active token: {e}[/red]")
             return None

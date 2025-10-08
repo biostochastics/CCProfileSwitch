@@ -55,3 +55,6 @@ def isolated_cc_profile_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     monkeypatch.setattr(config_module, "_user_config_dir", fake_user_config_dir)
 
     monkeypatch.setattr(utils_module, "find_claude_config_paths", lambda: [])
+
+    # Force file-based token storage so tests do not interact with macOS Keychain
+    monkeypatch.setenv("CCPS_FORCE_FILE_STORAGE", "1")

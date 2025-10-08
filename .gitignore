@@ -223,3 +223,4 @@ npm-debug.log*
 .venv*/
 venv*/
 virtualenv/
+tmp_profiles.json

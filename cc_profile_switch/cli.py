@@ -6,7 +6,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 import typer
 from rich.panel import Panel
@@ -28,7 +28,6 @@ from .fzf_integration import (
 from .storage import ProfileStorage
 from .theme import (
     console,
-    create_panel,
     get_icon,
     should_use_rich,
     show_error,
@@ -50,6 +49,33 @@ from .utils import (
     secure_file_permissions,
     validate_token,
 )
+
+
+def parse_oauth_token(token: str) -> Optional[dict]:
+    """Parse OAuth token JSON string, return None if not OAuth."""
+    if not isinstance(token, str) or not token.strip().startswith("{"):
+        return None
+    try:
+        parsed = json.loads(token)
+        if "claudeAiOauth" in parsed:
+            return parsed["claudeAiOauth"]
+    except json.JSONDecodeError:
+        pass
+    return None
+
+
+def check_oauth_expiration(oauth_data: dict) -> Tuple[bool, int]:
+    """Check if OAuth token is expired.
+
+    Returns:
+        Tuple of (is_expired, minutes_until_expiry)
+        minutes_until_expiry is negative if expired
+    """
+    expires_at = oauth_data.get("expiresAt", 0)
+    now_ms = int(time.time() * 1000)
+    minutes = (expires_at - now_ms) / 1000 / 60
+    return (expires_at < now_ms, int(minutes))
+
 
 app = typer.Typer(
     name="claude-profile",
@@ -205,7 +231,7 @@ def save(
             # Try to detect Z-AI token from environment
             token = detect_zai_token()
             if token:
-                show_info(f"Auto-detected Z-AI token from environment")
+                show_info("Auto-detected Z-AI token from environment")
             else:
                 show_info("No Z-AI token in environment (ZAI_API_KEY)")
                 token = Prompt.ask("Enter your Z-AI API key", password=True)
@@ -225,7 +251,9 @@ def save(
         if provider == PROVIDER_ZAI:
             show_info("Z-AI tokens should be at least 20 characters with no whitespace")
         else:
-            show_info("Claude tokens should start with 'sk-' and be at least 20 characters")
+            show_info(
+                "Claude tokens should start with 'sk-' and be at least 20 characters"
+            )
         raise typer.Exit(1)
 
     # Set API URL
@@ -271,13 +299,65 @@ def save(
             else:
                 # Claude: set token, remove base URL
                 env_update = {ENV_ANTHROPIC_AUTH_TOKEN: token}
-                if config.update_claude_settings(env_update, remove_keys=[ENV_ANTHROPIC_BASE_URL]):
+                if config.update_claude_settings(
+                    env_update, remove_keys=[ENV_ANTHROPIC_BASE_URL]
+                ):
                     show_success(f"Profile '{name}' is now active (Claude configured)")
                 else:
                     show_warning("Profile saved but could not update settings.json")
     else:
         show_error(f"Failed to save profile '{name}'")
         raise typer.Exit(1)
+
+
+def _perform_switch_update(
+    config: Config,
+    provider: str,
+    is_oauth: bool,
+    token: str,
+    api_url: Optional[str],
+) -> bool:
+    """Perform platform-specific settings update during profile switch.
+
+    OAuth token handling (cross-platform):
+    - macOS: Remove from settings.json (Claude Code reads from Keychain)
+    - Windows/Linux: Write to settings.json (no Keychain available)
+    - Plain API keys: Always write to settings.json
+    """
+    if provider == PROVIDER_ZAI:
+        # Z-AI always needs both URL and token in settings.json
+        env_update = {
+            ENV_ANTHROPIC_BASE_URL: api_url or ZAI_DEFAULT_API_URL,
+            ENV_ANTHROPIC_AUTH_TOKEN: token,
+        }
+        return config.update_claude_settings(env_update)
+
+    # Claude provider
+    if is_oauth:
+        # Platform-specific OAuth handling
+        if sys.platform == "darwin":
+            # macOS: Claude Code stores OAuth in Keychain, settings.json overrides it
+            # Solution: Remove token from settings.json so Keychain is used
+            console.print(
+                "[dim]Note: OAuth managed via macOS Keychain - "
+                "use /login in Claude Code if auth fails[/dim]"
+            )
+            return config.update_claude_settings(
+                {}, remove_keys=[ENV_ANTHROPIC_AUTH_TOKEN, ENV_ANTHROPIC_BASE_URL]
+            )
+        else:
+            # Windows/Linux: No Keychain, OAuth must be in settings.json
+            # Write OAuth token to settings.json (will be parsed to JSON object)
+            env_update = {ENV_ANTHROPIC_AUTH_TOKEN: token}
+            return config.update_claude_settings(
+                env_update, remove_keys=[ENV_ANTHROPIC_BASE_URL]
+            )
+    else:
+        # Plain API key: write to settings.json on all platforms
+        env_update = {ENV_ANTHROPIC_AUTH_TOKEN: token}
+        return config.update_claude_settings(
+            env_update, remove_keys=[ENV_ANTHROPIC_BASE_URL]
+        )
 
 
 @app.command()
@@ -341,7 +421,9 @@ def switch(
         console.print(f"  Target provider:  {target_provider.upper()}")
         console.print()
         console.print("[dim]Different providers use different API endpoints.[/dim]")
-        console.print("[dim]Create a new profile for the target provider instead:[/dim]")
+        console.print(
+            "[dim]Create a new profile for the target provider instead:[/dim]"
+        )
         console.print()
         console.print(f"  claude-profile save {name}_new --provider {target_provider}")
         raise typer.Exit(1)
@@ -350,35 +432,36 @@ def switch(
     token = profile["token"]
     api_url = profile.get("api_url")
 
+    # Check if this is an OAuth token and handle platform-specifically
+    oauth_data = parse_oauth_token(token)
+    is_oauth = oauth_data is not None
+
+    # Check OAuth expiration if applicable
+    if is_oauth:
+        is_expired, minutes = check_oauth_expiration(oauth_data)
+        if is_expired:
+            console.print(
+                f"[yellow]⚠ Warning: OAuth token expired {abs(minutes)} minutes ago[/yellow]"
+            )
+            console.print(
+                "[dim]After switching, run /login in Claude Code to refresh[/dim]"
+            )
+        elif minutes < 10:
+            console.print(
+                f"[yellow]⚠ OAuth token expires in {minutes} minutes[/yellow]"
+            )
+
     spinner = show_spinner(f"Switching to profile '{name}'...")
     if spinner:
         with spinner:
             time.sleep(0.5)  # Brief delay for visual feedback
-            # Update settings.json based on provider
-            if target_provider == PROVIDER_ZAI:
-                env_update = {
-                    ENV_ANTHROPIC_BASE_URL: api_url or ZAI_DEFAULT_API_URL,
-                    ENV_ANTHROPIC_AUTH_TOKEN: token,
-                }
-                success = config.update_claude_settings(env_update)
-            else:
-                # Claude: set token, remove base URL
-                env_update = {ENV_ANTHROPIC_AUTH_TOKEN: token}
-                success = config.update_claude_settings(
-                    env_update, remove_keys=[ENV_ANTHROPIC_BASE_URL]
-                )
-    else:
-        if target_provider == PROVIDER_ZAI:
-            env_update = {
-                ENV_ANTHROPIC_BASE_URL: api_url or ZAI_DEFAULT_API_URL,
-                ENV_ANTHROPIC_AUTH_TOKEN: token,
-            }
-            success = config.update_claude_settings(env_update)
-        else:
-            env_update = {ENV_ANTHROPIC_AUTH_TOKEN: token}
-            success = config.update_claude_settings(
-                env_update, remove_keys=[ENV_ANTHROPIC_BASE_URL]
+            success = _perform_switch_update(
+                config, target_provider, is_oauth, token, api_url
             )
+    else:
+        success = _perform_switch_update(
+            config, target_provider, is_oauth, token, api_url
+        )
 
     if success:
         show_success(f"Switched to profile '{name}'")
@@ -409,8 +492,6 @@ def list(
     ),
 ):
     """List all saved profiles grouped by provider."""
-    from .utils import detect_current_provider
-
     show_header("Profile List", "View all saved profiles")
 
     storage = get_storage()
@@ -420,12 +501,15 @@ def list(
     if not profiles:
         show_info("No profiles found")
         show_info("Create your first profile:")
-        console.print("  • Claude: [cyan]claude-profile save <name> --provider claude[/cyan]")
-        console.print("  • Z-AI:   [cyan]claude-profile save <name> --provider zai[/cyan]")
+        console.print(
+            "  • Claude: [cyan]claude-profile save <name> --provider claude[/cyan]"
+        )
+        console.print(
+            "  • Z-AI:   [cyan]claude-profile save <name> --provider zai[/cyan]"
+        )
         return
 
     # Detect active from settings.json
-    current_info = detect_current_provider()
     env_vars = config.get_claude_settings_env()
     active_token = env_vars.get(ENV_ANTHROPIC_AUTH_TOKEN)
     active_profile_name = None
@@ -468,7 +552,9 @@ def list(
         # Display Claude profiles
         if claude_profiles:
             console.print("[bold cyan]=== Claude Profiles ===[/bold cyan]\n")
-            table = create_profile_table(claude_profiles, show_tokens, active_profile_name)
+            table = create_profile_table(
+                claude_profiles, show_tokens, active_profile_name
+            )
             console.print(table)
             console.print()
 
@@ -476,8 +562,8 @@ def list(
         if zai_profiles:
             console.print("[bold magenta]=== Z-AI Profiles ===[/bold magenta]\n")
             # Create Z-AI specific table with API URL column
-            from rich.table import Table
             from rich import box
+            from rich.table import Table
 
             table = Table(
                 box=box.MINIMAL_HEAVY_HEAD,
@@ -588,7 +674,7 @@ def current():
     if base_url:
         info_lines.append(f"[dim]API URL:[/dim] {base_url}")
 
-    info_lines.append(f"[dim]Token:[/dim] Token configured ✓")
+    info_lines.append("[dim]Token:[/dim] Token configured ✓")
 
     info_lines.append("")
     info_lines.append(
@@ -786,6 +872,8 @@ def export(
     for name, data in profiles.items():
         export_data[name] = {
             "metadata": data.get("metadata", {}),
+            "provider": data.get("provider", PROVIDER_CLAUDE),
+            "api_url": data.get("api_url"),
             "token": data["token"] if include_tokens else mask_token(data["token"]),
         }
 
@@ -879,17 +967,19 @@ def import_profiles(
                 )
                 continue
 
+            provider = (data.get("provider") or PROVIDER_CLAUDE).lower()
+            api_url = data.get("api_url")
             token = data.get("token")
-            provider = data.get("provider", PROVIDER_CLAUDE)
-            
-            # Check if token is masked (contains many asterisks)
-            is_masked = token and ("*" * 10) in token
-            
-            # Validate token
+
+            is_masked = isinstance(token, str) and (
+                "*" in token or token.startswith("OAuth:")
+            )
             token_valid = False
+            error_msg = ""
+
             if token and not is_masked:
-                token_valid, _ = validate_token(token, provider)
-            
+                token_valid, error_msg = validate_token(token, provider)
+
             if not token or is_masked or not token_valid:
                 reason = "masked" if is_masked else "missing or invalid"
                 show_warning(
@@ -903,17 +993,23 @@ def import_profiles(
                     if not token or not token_valid:
                         show_warning(
                             f"Skipping profile '{profile_name}' - "
-                            f"provided token invalid: {error_msg}"
+                            f"provided token invalid ({error_msg or 'unknown error'})"
                         )
                         continue
                 else:
                     show_warning(f"Skipping profile '{profile_name}' - token {reason}")
                     continue
+
             metadata = data.get("metadata", {})
             metadata["imported"] = datetime.now().isoformat()
-            api_url = data.get("api_url")
 
-            if storage.save_profile(profile_name, token, metadata, provider=provider, api_url=api_url):
+            if storage.save_profile(
+                profile_name,
+                token,
+                metadata,
+                provider=provider,
+                api_url=api_url,
+            ):
                 imported_count += 1
                 imported_names.append(profile_name)
                 console.print(f"[green]Imported: {profile_name}[/green]")
@@ -966,14 +1062,18 @@ def show(
     if api_url:
         info_lines.append(f"[dim]API URL:[/dim] {api_url}")
 
-    info_lines.extend([
-        f"[dim]Token:[/dim] {token_display}",
-        f"[dim]Created:[/dim] {format_timestamp(metadata.get('created'))}",
-        f"[dim]Description:[/dim] {metadata.get('description', 'No description')}",
-    ])
+    info_lines.extend(
+        [
+            f"[dim]Token:[/dim] {token_display}",
+            f"[dim]Created:[/dim] {format_timestamp(metadata.get('created'))}",
+            f"[dim]Description:[/dim] {metadata.get('description', 'No description')}",
+        ]
+    )
 
-    if metadata.get('imported'):
-        info_lines.append(f"[dim]Imported:[/dim] {format_timestamp(metadata.get('imported'))}")
+    if metadata.get("imported"):
+        info_lines.append(
+            f"[dim]Imported:[/dim] {format_timestamp(metadata.get('imported'))}"
+        )
 
     console.print(
         Panel(

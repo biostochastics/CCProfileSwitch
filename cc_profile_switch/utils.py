@@ -1,7 +1,6 @@
 """Utility functions for CC Profile Switch."""
 
 import os
-import re
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -16,7 +15,6 @@ from .constants import (
     ENV_ZHIPUAI_API_KEY,
     PROVIDER_CLAUDE,
     PROVIDER_ZAI,
-    ZAI_DEFAULT_API_URL,
 )
 from .theme import console, get_icon, should_use_rich
 

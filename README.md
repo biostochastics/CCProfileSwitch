@@ -144,6 +144,48 @@ Profile switching is instant, secure, and deterministic. You always know which c
 - **macOS**: All credentials in Keychain (OAuth tokens never written to disk)
 - **Linux/Windows**: Active credentials in monitored file, profiles in system credential manager
 
+### OAuth Token Management (Important)
+
+**OAuth tokens expire after approximately 1 hour** and require periodic refresh. CCProfileSwitch handles OAuth tokens differently depending on your platform:
+
+**macOS:**
+- OAuth tokens stored in **macOS Keychain** (service: `Claude Code-credentials`)
+- When switching to OAuth profiles, CCProfileSwitch **removes tokens from settings.json**
+- Why? Claude Code reads from Keychain on macOS, and settings.json overrides it
+- **After switching OAuth profiles**: Run `/login` in Claude Code to refresh the token
+
+**Windows/Linux:**
+- OAuth tokens stored in **settings.json** (no system keychain equivalent)
+- When switching, CCProfileSwitch writes OAuth tokens to settings.json
+- Expiration warnings shown if token is stale
+- **After switching OAuth profiles**: Run `/login` in Claude Code if you see 401 errors
+
+**Plain API Keys (All Platforms):**
+- API keys (`sk-ant-api*`) don't expire
+- Always written to settings.json
+- No `/login` needed after switching
+
+**Recommended Workflow:**
+```bash
+# Switch to OAuth profile
+$ claude-profile switch work
+⚠ OAuth token expired 120 minutes ago
+After switching, run /login in Claude Code to refresh
+✔ Switched to profile 'work'
+
+# Restart Claude Code
+$ # Close and restart Claude Code
+
+# In Claude Code, run /login to refresh OAuth token
+# Then continue working
+```
+
+**Why This Design?**
+- OAuth tokens contain `accessToken`, `refreshToken`, and `expiresAt`
+- Stored tokens in profiles can become stale (especially if profile unused for hours/days)
+- Platform-specific storage (Keychain vs settings.json) requires different handling
+- `/login` command updates platform storage with fresh tokens automatically
+
 ## Quick Start
 
 Install CCProfileSwitch and let it auto-detect your current Claude token:

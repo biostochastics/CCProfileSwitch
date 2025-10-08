@@ -11,8 +11,6 @@ except ImportError:  # pragma: no cover - fallback for minimal environments
     platform_user_config_dir = None  # type: ignore[assignment]
 from rich.console import Console
 
-from .constants import ENV_ANTHROPIC_AUTH_TOKEN, ENV_ANTHROPIC_BASE_URL
-
 console = Console()
 
 
@@ -196,8 +194,26 @@ class Config:
         if "env" not in settings or not isinstance(settings["env"], dict):
             settings["env"] = {}
 
-        # Update environment variables
-        settings["env"].update(env_vars)
+        # Update environment variables, converting OAuth JSON strings to objects
+        for key, value in env_vars.items():
+            if key == "ANTHROPIC_AUTH_TOKEN" and isinstance(value, str):
+                # Check if value is a JSON-serialized OAuth token
+                if value.strip().startswith("{"):
+                    try:
+                        # Parse the JSON string to an object so Claude Code can use it
+                        parsed = json.loads(value)
+                        if "claudeAiOauth" in parsed:
+                            settings["env"][key] = parsed
+                        else:
+                            settings["env"][key] = value
+                    except json.JSONDecodeError:
+                        # Not valid JSON, store as-is (probably a plain API key starting with {)
+                        settings["env"][key] = value
+                else:
+                    # Plain API key
+                    settings["env"][key] = value
+            else:
+                settings["env"][key] = value
 
         # Remove specified keys
         if remove_keys:
