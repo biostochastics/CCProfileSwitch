@@ -474,14 +474,23 @@ def _perform_switch_update(
 ) -> bool:
     """Perform platform-specific settings update during profile switch.
 
-    DISABLED: No longer writes to settings.json.
-    Claude Code reads auth from:
-    - macOS: Keychain (via /login) or shell environment variables
-    - Use shell environment variables (cpswitch) for all auth including Z-AI
+    Updates settings.json with appropriate environment variables for the provider.
+    - For Z-AI: Sets ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN
+    - For Claude: Sets ANTHROPIC_AUTH_TOKEN, removes ANTHROPIC_BASE_URL
     """
-    # Do not update settings.json - rely entirely on shell environment variables
-    # and Claude Code's /login for subscription OAuth
-    return True
+    if provider == PROVIDER_ZAI:
+        # Z-AI: set both base URL and auth token
+        env_update = {
+            ENV_ANTHROPIC_BASE_URL: api_url or ZAI_DEFAULT_API_URL,
+            ENV_ANTHROPIC_AUTH_TOKEN: token,
+        }
+        return config.update_claude_settings(env_update)
+    else:
+        # Claude: set token, remove base URL
+        env_update = {ENV_ANTHROPIC_AUTH_TOKEN: token}
+        return config.update_claude_settings(
+            env_update, remove_keys=[ENV_ANTHROPIC_BASE_URL]
+        )
 
 
 @app.command()
