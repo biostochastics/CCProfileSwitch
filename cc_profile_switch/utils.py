@@ -471,3 +471,57 @@ def secure_file_permissions(path: Path) -> bool:
         return True
     except Exception:
         return False
+
+
+def validate_safe_path(path_str: str, base_dir: Optional[Path] = None) -> Tuple[bool, str, Optional[Path]]:
+    """Validate that a file path is safe and within allowed directories.
+
+    Args:
+        path_str: Path string to validate
+        base_dir: Optional base directory to restrict paths to (defaults to home directory)
+
+    Returns:
+        Tuple of (is_valid, error_message, resolved_path)
+    """
+    if not path_str:
+        return False, "Path cannot be empty", None
+
+    try:
+        import tempfile
+
+        # Expand user home directory
+        path = Path(path_str).expanduser()
+
+        # Resolve to absolute path to prevent directory traversal
+        resolved_path = path.resolve()
+
+        # Set base directory to home if not specified
+        if base_dir is None:
+            base_dir = Path.home()
+        else:
+            base_dir = base_dir.resolve()
+
+        # Check if resolved path is within base directory OR system temp directory
+        is_in_base = False
+        try:
+            resolved_path.relative_to(base_dir)
+            is_in_base = True
+        except ValueError:
+            # Also allow system temp directory (for testing and temporary operations)
+            temp_dir = Path(tempfile.gettempdir()).resolve()
+            try:
+                resolved_path.relative_to(temp_dir)
+                is_in_base = True
+            except ValueError:
+                return False, f"Path must be within {base_dir} or system temp directory", None
+
+        # Additional check: ensure no suspicious path components after resolution
+        # After resolve(), ".." and "~" should not appear in the resolved path
+        path_str_resolved = str(resolved_path)
+        if "/.." in path_str_resolved or "/./" in path_str_resolved:
+            return False, "Path contains suspicious components", None
+
+        return True, "", resolved_path
+
+    except Exception as e:
+        return False, f"Invalid path: {type(e).__name__}", None

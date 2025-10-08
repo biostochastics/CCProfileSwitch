@@ -64,7 +64,7 @@ class Config:
                 json.dump(config, f, indent=2)
             return True
         except Exception as e:
-            console.print(f"[red]Error saving config: {e}[/red]")
+            console.print(f"[red]Error saving config: {type(e).__name__}[/red]")
             return False
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -144,16 +144,22 @@ class Config:
     def _write_json_atomic(self, path: Path, data: dict) -> bool:
         """Write JSON atomically using temp file."""
         try:
+            import os
+            import stat
+
             path.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(
                 "w", dir=str(path.parent), delete=False, suffix=".json"
             ) as tmp_file:
                 json.dump(data, tmp_file, indent=2)
                 temp_path = Path(tmp_file.name)
+
+            # Set secure permissions before moving (especially for settings.json with tokens)
+            os.chmod(temp_path, stat.S_IRUSR | stat.S_IWUSR)
             temp_path.replace(path)
             return True
         except Exception as e:
-            console.print(f"[red]Error writing {path}: {e}[/red]")
+            console.print(f"[red]Error writing {path}: {type(e).__name__}[/red]")
             return False
 
     def get_claude_settings_env(self) -> dict:

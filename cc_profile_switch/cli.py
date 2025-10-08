@@ -79,13 +79,21 @@ def _tokens_match(profile_token: str, active_token: object) -> bool:
     """
     # If active_token is a dict (OAuth stored as object in settings.json)
     if isinstance(active_token, dict):
+        # Validate profile_token is a string before parsing
+        if not isinstance(profile_token, str):
+            return False
         try:
             # Parse profile_token as JSON and compare objects
-            return json.loads(profile_token) == active_token
-        except json.JSONDecodeError:
+            parsed_profile = json.loads(profile_token)
+            return parsed_profile == active_token
+        except (json.JSONDecodeError, TypeError, ValueError):
+            # If parsing fails, tokens don't match
             return False
     # Both are strings - direct comparison
-    return profile_token == active_token
+    if isinstance(profile_token, str) and isinstance(active_token, str):
+        return profile_token == active_token
+    # Type mismatch
+    return False
 
 
 def check_oauth_expiration(oauth_data: dict) -> Tuple[bool, int]:
@@ -466,14 +474,23 @@ def _perform_switch_update(
 ) -> bool:
     """Perform platform-specific settings update during profile switch.
 
-    DISABLED: No longer writes to settings.json.
-    Claude Code reads auth from:
-    - macOS: Keychain (via /login) or shell environment variables
-    - Use shell environment variables (cpswitch) for all auth including Z-AI
+    Updates settings.json with appropriate environment variables for the provider.
+    - For Z-AI: Sets ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN
+    - For Claude: Sets ANTHROPIC_AUTH_TOKEN, removes ANTHROPIC_BASE_URL
     """
-    # Do not update settings.json - rely entirely on shell environment variables
-    # and Claude Code's /login for subscription OAuth
-    return True
+    if provider == PROVIDER_ZAI:
+        # Z-AI: set both base URL and auth token
+        env_update = {
+            ENV_ANTHROPIC_BASE_URL: api_url or ZAI_DEFAULT_API_URL,
+            ENV_ANTHROPIC_AUTH_TOKEN: token,
+        }
+        return config.update_claude_settings(env_update)
+    else:
+        # Claude: set token, remove base URL
+        env_update = {ENV_ANTHROPIC_AUTH_TOKEN: token}
+        return config.update_claude_settings(
+            env_update, remove_keys=[ENV_ANTHROPIC_BASE_URL]
+        )
 
 
 @app.command()
@@ -575,16 +592,30 @@ def switch(
         # Claude Code on macOS prioritizes Keychain over settings.json, so we must remove it
         if target_provider == PROVIDER_ZAI or not is_oauth:
             try:
-                subprocess.run(
-                    ["security", "delete-generic-password", "-s", "Claude Code-credentials"],
+                # Check if security binary is available
+                security_check = subprocess.run(
+                    ["which", "security"],
                     capture_output=True,
-                    check=False  # Don't raise if entry doesn't exist
+                    text=True,
+                    check=False
                 )
+                if security_check.returncode != 0:
+                    if not eval_mode:
+                        console.print("[yellow]⚠ macOS security command not available[/yellow]")
+                else:
+                    subprocess.run(
+                        ["security", "delete-generic-password", "-s", "Claude Code-credentials"],
+                        capture_output=True,
+                        check=False  # Don't raise if entry doesn't exist
+                    )
+                    if not eval_mode:
+                        console.print("[dim]Cleared OAuth from Keychain (settings.json will be used)[/dim]")
+            except (subprocess.SubprocessError, FileNotFoundError) as e:
                 if not eval_mode:
-                    console.print("[dim]Cleared OAuth from Keychain (settings.json will be used)[/dim]")
+                    console.print(f"[yellow]⚠ Could not clear Keychain: {type(e).__name__}[/yellow]")
             except Exception as e:
                 if not eval_mode:
-                    console.print(f"[yellow]⚠ Could not clear Keychain: {e}[/yellow]")
+                    console.print(f"[yellow]⚠ Unexpected error clearing Keychain: {type(e).__name__}[/yellow]")
 
         if is_oauth:
             # Only write valid OAuth to Keychain
@@ -1103,12 +1134,19 @@ def export(
 
     if output_file:
         try:
-            output_path = Path(output_file).expanduser()
+            from .utils import validate_safe_path
+
+            # Validate path for security
+            is_valid, error_msg, output_path = validate_safe_path(output_file)
+            if not is_valid:
+                show_error(f"Invalid output path: {error_msg}")
+                raise typer.Exit(1)
+
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(output)
             show_success(f"Profiles exported to {output_path}")
         except Exception as e:
-            show_error(f"Failed to write export file: {e}")
+            show_error(f"Failed to write export file: {type(e).__name__}")
             raise typer.Exit(1)
     else:
         console.print(output)
