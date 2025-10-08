@@ -22,9 +22,12 @@ def _read_pyproject_version() -> str | None:
             return None
 
     try:
-        data = tomllib.loads(pyproject_path.read_text())
+        text = pyproject_path.read_text(encoding="utf-8")
+        data = tomllib.loads(text)
         return data["tool"]["poetry"]["version"]
-    except Exception:  # pragma: no cover - treat parse errors as absence
+    except (OSError, KeyError):  # pragma: no cover - IO/key errors
+        return None
+    except Exception:  # pragma: no cover - TOML decode errors (varies by library)
         return None
 
 

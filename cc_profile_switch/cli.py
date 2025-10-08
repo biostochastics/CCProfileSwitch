@@ -57,9 +57,11 @@ def parse_oauth_token(token: str) -> Optional[dict]:
         return None
     try:
         parsed = json.loads(token)
-        if "claudeAiOauth" in parsed:
-            return parsed["claudeAiOauth"]
-    except json.JSONDecodeError:
+        if isinstance(parsed, dict) and "claudeAiOauth" in parsed:
+            oauth_data = parsed["claudeAiOauth"]
+            if isinstance(oauth_data, dict):
+                return oauth_data
+    except (json.JSONDecodeError, TypeError, ValueError):
         pass
     return None
 
@@ -870,11 +872,12 @@ def export(
 
     export_data = {}
     for name, data in profiles.items():
+        token = data.get("token", "")
         export_data[name] = {
             "metadata": data.get("metadata", {}),
             "provider": data.get("provider", PROVIDER_CLAUDE),
             "api_url": data.get("api_url"),
-            "token": data["token"] if include_tokens else mask_token(data["token"]),
+            "token": token if include_tokens else mask_token(token),
         }
 
     if format.lower() == "yaml":

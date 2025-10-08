@@ -43,14 +43,17 @@ class ProfileStorage:
 
     def _normalize_profile(self, profile: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize profile data with defaults for backward compatibility."""
+        # Work on a shallow copy to avoid mutating the caller's dict
+        normalized = dict(profile or {})
+
         # Set default provider if missing
-        profile.setdefault("provider", PROVIDER_CLAUDE)
+        normalized.setdefault("provider", PROVIDER_CLAUDE)
 
         # Set default API URL for Z-AI profiles
-        if profile["provider"] == PROVIDER_ZAI:
-            profile.setdefault("api_url", ZAI_DEFAULT_API_URL)
+        if normalized["provider"] == PROVIDER_ZAI:
+            normalized.setdefault("api_url", ZAI_DEFAULT_API_URL)
 
-        return profile
+        return normalized
 
     def save_profile(
         self,

@@ -63,8 +63,8 @@ def should_use_unicode() -> bool:
     if os.getenv("CCPS_ASCII"):
         return False
     # Safe encoding check - handles None when output is piped/redirected
-    encoding = (sys.stdout.encoding or "").lower()
-    return encoding in ("utf-8", "utf8")
+    encoding = (getattr(sys.stdout, "encoding", "") or "").lower()
+    return "utf" in encoding
 
 
 def get_icon(name: str) -> str:

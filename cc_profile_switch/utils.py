@@ -3,7 +3,7 @@
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from rich import box
 from rich.prompt import Confirm, Prompt
@@ -69,12 +69,8 @@ def validate_token(token: str, provider: str = PROVIDER_CLAUDE) -> Tuple[bool, s
     if not token:
         return False, "Token is empty"
 
-    # Basic checks for all providers
-    if " " in token or "\n" in token or "\t" in token:
-        return False, "Token contains whitespace"
-
     if provider == PROVIDER_CLAUDE:
-        # Check if it's OAuth JSON
+        # Check if it's OAuth JSON first (may contain legitimate whitespace)
         try:
             data = json.loads(token)
             if "claudeAiOauth" in data:
@@ -93,6 +89,10 @@ def validate_token(token: str, provider: str = PROVIDER_CLAUDE) -> Tuple[bool, s
 
         # Plain token validation for Claude
         # Claude tokens: sk-ant-{type}-{key} or plain sk-* tokens
+        # Check for whitespace (OAuth JSON was already handled above)
+        if " " in token or "\n" in token or "\t" in token:
+            return False, "Token contains whitespace"
+
         if len(token) < 20:
             return False, "Token too short (minimum 20 characters)"
 
@@ -103,6 +103,10 @@ def validate_token(token: str, provider: str = PROVIDER_CLAUDE) -> Tuple[bool, s
 
     elif provider == PROVIDER_ZAI:
         # Z-AI tokens: be permissive but safe
+        # Check for whitespace
+        if " " in token or "\n" in token or "\t" in token:
+            return False, "Token contains whitespace"
+
         if len(token) < 20:
             return False, "Token too short (minimum 20 characters)"
         return True, ""
@@ -115,7 +119,7 @@ def detect_zai_token() -> Optional[str]:
     return os.getenv(ENV_ZAI_API_KEY) or os.getenv(ENV_ZHIPUAI_API_KEY)
 
 
-def detect_current_provider() -> Dict[str, any]:
+def detect_current_provider() -> Dict[str, Any]:
     """Detect current provider from Claude settings.json.
 
     Returns:

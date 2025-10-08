@@ -224,3 +224,6 @@ npm-debug.log*
 venv*/
 virtualenv/
 tmp_profiles.json
+
+# Code concatenation tools
+codeconcat_output.markdown
