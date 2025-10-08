@@ -439,7 +439,7 @@ def switch(
     is_oauth = oauth_data is not None
 
     # Check OAuth expiration if applicable
-    if is_oauth:
+    if oauth_data is not None:
         is_expired, minutes = check_oauth_expiration(oauth_data)
         if is_expired:
             console.print(
