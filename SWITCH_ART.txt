@@ -1,0 +1,35 @@
+
+    ╔════════════════════════════════════════════════════════════╗
+    ║                                                            ║
+    ║         🔄  CCProfileSwitch  🔄                            ║
+    ║                                                            ║
+    ║    ┌──────────┐              ┌──────────┐                 ║
+    ║    │  Claude  │              │   Z-AI   │                 ║
+    ║    │ Profiles │              │ Profiles │                 ║
+    ║    └────┬─────┘              └────┬─────┘                 ║
+    ║         │                         │                       ║
+    ║         │    ╔═══════════╗        │                       ║
+    ║         └────║  SWITCH   ║────────┘                       ║
+    ║              ║   ○───○   ║                                ║
+    ║              ╚═════╦═════╝                                ║
+    ║                    │                                      ║
+    ║                    ▼                                      ║
+    ║            ~/.claude/settings.json                        ║
+    ║                    │                                      ║
+    ║                    ▼                                      ║
+    ║              ╔═══════════╗                                ║
+    ║              ║ Claude    ║                                ║
+    ║              ║  Code     ║                                ║
+    ║              ╚═══════════╝                                ║
+    ║                                                            ║
+    ╚════════════════════════════════════════════════════════════╝
+
+         Provider Isolation: Claude ⚡ Z-AI
+
+    Usage:
+    ┌─────────────────────────────────────────────────┐
+    │ $ claude-profile save work --provider claude    │
+    │ $ claude-profile save zai-glm46 --provider zai  │
+    │ $ claude-profile switch work                    │
+    │ $ claude-profile list                           │
+    └─────────────────────────────────────────────────┘

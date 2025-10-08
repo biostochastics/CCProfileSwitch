@@ -1,14 +1,21 @@
 """Utility functions for CC Profile Switch."""
 
-import re
+import os
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from rich import box
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
+from .constants import (
+    ENV_ANTHROPIC_BASE_URL,
+    ENV_ZAI_API_KEY,
+    ENV_ZHIPUAI_API_KEY,
+    PROVIDER_CLAUDE,
+    PROVIDER_ZAI,
+)
 from .theme import console, get_icon, should_use_rich
 
 
@@ -47,36 +54,101 @@ def mask_token(token: str, visible_chars: int = 4) -> str:
     return token[:visible_chars] + "*" * (len(token) - visible_chars)
 
 
-def validate_token(token: str) -> bool:
-    """Validate Claude API token format (sk-ant-* pattern).
+def validate_token(token: str, provider: str = PROVIDER_CLAUDE) -> Tuple[bool, str]:
+    """Validate API token format for a specific provider.
 
-    Accepts both plain tokens and OAuth JSON structures.
+    Args:
+        token: The API key or token to validate
+        provider: Provider name ("claude" or "zai")
+
+    Returns:
+        Tuple of (is_valid, error_message)
     """
     import json
 
     if not token:
-        return False
+        return False, "Token is empty"
 
-    # Check if it's OAuth JSON
-    try:
-        data = json.loads(token)
-        if "claudeAiOauth" in data:
-            # Validate OAuth structure has required fields
-            oauth = data["claudeAiOauth"]
-            has_access = "accessToken" in oauth and oauth["accessToken"]
-            has_refresh = "refreshToken" in oauth
-            return has_access and has_refresh
-        elif "token" in data:
-            # Wrapped token - validate inner token
-            return validate_token(data["token"])
-    except (json.JSONDecodeError, TypeError):
-        pass
+    if provider == PROVIDER_CLAUDE:
+        # Check if it's OAuth JSON first (may contain legitimate whitespace)
+        try:
+            data = json.loads(token)
+            if "claudeAiOauth" in data:
+                # Validate OAuth structure has required fields
+                oauth = data["claudeAiOauth"]
+                has_access = "accessToken" in oauth and oauth["accessToken"]
+                has_refresh = "refreshToken" in oauth
+                if has_access and has_refresh:
+                    return True, ""
+                return False, "OAuth structure missing required fields"
+            elif "token" in data:
+                # Wrapped token - validate inner token
+                return validate_token(data["token"], provider)
+        except (json.JSONDecodeError, TypeError):
+            pass
 
-    # Plain token validation
-    # Claude tokens: sk-ant-{type}-{key} where type is api03, oat01, ort01, etc.
-    if len(token) < 20:
-        return False
-    return bool(re.match(r"^sk-ant-[a-zA-Z0-9]{4,}-[a-zA-Z0-9\-_]{7,}$", token))
+        # Plain token validation for Claude
+        # Claude tokens: sk-ant-{type}-{key} or plain sk-* tokens
+        # Check for whitespace (OAuth JSON was already handled above)
+        if " " in token or "\n" in token or "\t" in token:
+            return False, "Token contains whitespace"
+
+        if len(token) < 20:
+            return False, "Token too short (minimum 20 characters)"
+
+        if token.startswith("sk-"):
+            return True, ""
+
+        return False, "Claude token must start with 'sk-' prefix"
+
+    elif provider == PROVIDER_ZAI:
+        # Z-AI tokens: be permissive but safe
+        # Check for whitespace
+        if " " in token or "\n" in token or "\t" in token:
+            return False, "Token contains whitespace"
+
+        if len(token) < 20:
+            return False, "Token too short (minimum 20 characters)"
+        return True, ""
+
+    return False, f"Unknown provider: {provider}"
+
+
+def detect_zai_token() -> Optional[str]:
+    """Detect Z-AI API key from environment variables."""
+    return os.getenv(ENV_ZAI_API_KEY) or os.getenv(ENV_ZHIPUAI_API_KEY)
+
+
+def detect_current_provider() -> Dict[str, Any]:
+    """Detect current provider from Claude settings.json.
+
+    Returns:
+        Dictionary with keys:
+        - provider: "claude" or "zai"
+        - token_present: bool
+        - base_url: Optional[str]
+        - source: str
+    """
+    from .config import Config
+
+    config = Config()
+    env_vars = config.get_claude_settings_env()
+
+    base_url = env_vars.get(ENV_ANTHROPIC_BASE_URL)
+    has_token = "ANTHROPIC_AUTH_TOKEN" in env_vars
+
+    # Infer provider from base URL
+    if base_url and ("z.ai" in base_url or "bigmodel.cn" in base_url):
+        provider = PROVIDER_ZAI
+    else:
+        provider = PROVIDER_CLAUDE
+
+    return {
+        "provider": provider,
+        "token_present": has_token,
+        "base_url": base_url,
+        "source": "claude_settings_env",
+    }
 
 
 def find_claude_config_paths() -> List[Path]:

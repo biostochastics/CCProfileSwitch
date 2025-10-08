@@ -1,0 +1,16 @@
+{
+  "default": {
+    "metadata": {
+      "created": "2025-10-07T00:26:44.682286",
+      "description": "Auto-imported from existing configuration"
+    },
+    "token": "{\"claudeAiOauth\":{\"accessToken\":\"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\",\"refreshToken\":\"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\",\"expiresAt\":1759850732899,\"scopes\":[\"user:inference\",\"user:profile\"],\"subscriptionType\":\"pro\"}}"
+  },
+  "lesley": {
+    "metadata": {
+      "created": "2025-10-07T00:26:55.492641",
+      "description": "Profile saved on 2025-10-07"
+    },
+    "token": "{\"claudeAiOauth\":{\"accessToken\":\"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\",\"refreshToken\":\"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\",\"expiresAt\":1759850732899,\"scopes\":[\"user:inference\",\"user:profile\"],\"subscriptionType\":\"pro\"}}"
+  }
+}

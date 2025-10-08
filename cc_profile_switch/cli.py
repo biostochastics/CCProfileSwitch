@@ -6,13 +6,20 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 import typer
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
 from .config import Config
+from .constants import (
+    ENV_ANTHROPIC_AUTH_TOKEN,
+    ENV_ANTHROPIC_BASE_URL,
+    PROVIDER_CLAUDE,
+    PROVIDER_ZAI,
+    ZAI_DEFAULT_API_URL,
+)
 from .fzf_integration import (
     check_fzf_available,
     fzf_select_profile,
@@ -21,7 +28,6 @@ from .fzf_integration import (
 from .storage import ProfileStorage
 from .theme import (
     console,
-    create_panel,
     get_icon,
     should_use_rich,
     show_error,
@@ -43,6 +49,35 @@ from .utils import (
     secure_file_permissions,
     validate_token,
 )
+
+
+def parse_oauth_token(token: str) -> Optional[dict]:
+    """Parse OAuth token JSON string, return None if not OAuth."""
+    if not isinstance(token, str) or not token.strip().startswith("{"):
+        return None
+    try:
+        parsed = json.loads(token)
+        if isinstance(parsed, dict) and "claudeAiOauth" in parsed:
+            oauth_data = parsed["claudeAiOauth"]
+            if isinstance(oauth_data, dict):
+                return oauth_data
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+    return None
+
+
+def check_oauth_expiration(oauth_data: dict) -> Tuple[bool, int]:
+    """Check if OAuth token is expired.
+
+    Returns:
+        Tuple of (is_expired, minutes_until_expiry)
+        minutes_until_expiry is negative if expired
+    """
+    expires_at = oauth_data.get("expiresAt", 0)
+    now_ms = int(time.time() * 1000)
+    minutes = (expires_at - now_ms) / 1000 / 60
+    return (expires_at < now_ms, int(minutes))
+
 
 app = typer.Typer(
     name="claude-profile",
@@ -148,10 +183,19 @@ def init(
 def save(
     name: str = typer.Argument(..., help="Profile name to save"),
     token: Optional[str] = typer.Option(
-        None, "--token", help="Claude token (will prompt if not provided)"
+        None, "--token", "-t", help="API token (will prompt if not provided)"
     ),
     description: Optional[str] = typer.Option(
-        None, "--description", help="Profile description"
+        None, "--description", "-d", help="Profile description"
+    ),
+    provider: str = typer.Option(
+        PROVIDER_CLAUDE,
+        "--provider",
+        "-p",
+        help="Provider: claude or zai",
+    ),
+    api_url: Optional[str] = typer.Option(
+        None, "--api-url", help="Custom API URL (defaults to Z-AI for zai provider)"
     ),
     set_active: bool = typer.Option(
         True, "--active/--no-active", help="Set as active profile after saving"
@@ -160,11 +204,19 @@ def save(
         False, "--overwrite/--no-overwrite", help="Overwrite existing profile"
     ),
 ):
-    """Save the current or provided token as a named profile."""
+    """Save an API token as a named profile."""
+    from .utils import detect_zai_token, validate_token
+
     show_header("Save Profile", f"Save profile '{name}'")
 
     storage = get_storage()
     config = get_config()
+
+    # Validate provider
+    provider = provider.lower()
+    if provider not in [PROVIDER_CLAUDE, PROVIDER_ZAI]:
+        show_error(f"Invalid provider: {provider}. Use 'claude' or 'zai'")
+        raise typer.Exit(1)
 
     # Check if profile exists
     existing_profile = storage.get_profile(name)
@@ -175,27 +227,49 @@ def save(
             console.print("Operation cancelled.")
             raise typer.Exit()
 
-    # Get token
+    # Get token based on provider
     if not token:
-        token = detect_current_token()
-        if token:
-            show_info(f"Auto-detected current token: {mask_token(token)}")
+        if provider == PROVIDER_ZAI:
+            # Try to detect Z-AI token from environment
+            token = detect_zai_token()
+            if token:
+                show_info("Auto-detected Z-AI token from environment")
+            else:
+                show_info("No Z-AI token in environment (ZAI_API_KEY)")
+                token = Prompt.ask("Enter your Z-AI API key", password=True)
         else:
-            show_warning("No current token detected - please enter manually")
-            token = Prompt.ask("Enter your Claude token", password=True)
+            # Claude: try existing detection
+            token = detect_current_token()
+            if token:
+                show_info(f"Auto-detected current token: {mask_token(token)}")
+            else:
+                show_warning("No current token detected - please enter manually")
+                token = Prompt.ask("Enter your Claude token", password=True)
 
-    if not validate_token(token):
-        show_error("Invalid token format")
+    # Validate token
+    is_valid, error_msg = validate_token(token, provider)
+    if not is_valid:
+        show_error(f"Invalid token: {error_msg}")
+        if provider == PROVIDER_ZAI:
+            show_info("Z-AI tokens should be at least 20 characters with no whitespace")
+        else:
+            show_info(
+                "Claude tokens should start with 'sk-' and be at least 20 characters"
+            )
         raise typer.Exit(1)
+
+    # Set API URL
+    if provider == PROVIDER_ZAI and not api_url:
+        api_url = ZAI_DEFAULT_API_URL
 
     # Save profile
     metadata = {
         "created": datetime.now().isoformat(),
         "description": description
-        or f"Profile saved on {datetime.now().strftime('%Y-%m-%d')}",
+        or f"{provider.upper()} profile saved on {datetime.now().strftime('%Y-%m-%d')}",
     }
 
-    if storage.save_profile(name, token, metadata):
+    if storage.save_profile(name, token, metadata, provider=provider, api_url=api_url):
         # Update profile list - get existing profiles and add the new one
         existing_profiles = storage.list_profiles()
         if existing_profiles and hasattr(existing_profiles, "keys"):
@@ -207,21 +281,85 @@ def save(
             all_profile_names.append(name)
         storage.update_profile_list(all_profile_names)
 
-        show_success(f"Profile '{name}' saved successfully")
+        console.print(f"[green]✓ Profile '{name}' saved successfully[/green]")
+        console.print(f"  Provider: [cyan]{provider.upper()}[/cyan]")
+        if api_url:
+            console.print(f"  API URL: [dim]{api_url}[/dim]")
 
         # Set as active if requested
         if set_active:
-            # On macOS, don't pass target_path to ensure keychain write
-            target_path = (
-                None if sys.platform == "darwin" else config.get_active_token_path()
-            )
-            if storage.save_active_token(token, target_path):
-                show_success(f"Profile '{name}' is now active")
+            # Update Claude settings.json with appropriate environment variables
+            if provider == PROVIDER_ZAI:
+                env_update = {
+                    ENV_ANTHROPIC_BASE_URL: api_url or ZAI_DEFAULT_API_URL,
+                    ENV_ANTHROPIC_AUTH_TOKEN: token,
+                }
+                if config.update_claude_settings(env_update):
+                    show_success(f"Profile '{name}' is now active (Z-AI configured)")
+                else:
+                    show_warning("Profile saved but could not update settings.json")
             else:
-                show_warning("Profile saved but could not set as active")
+                # Claude: set token, remove base URL
+                env_update = {ENV_ANTHROPIC_AUTH_TOKEN: token}
+                if config.update_claude_settings(
+                    env_update, remove_keys=[ENV_ANTHROPIC_BASE_URL]
+                ):
+                    show_success(f"Profile '{name}' is now active (Claude configured)")
+                else:
+                    show_warning("Profile saved but could not update settings.json")
     else:
         show_error(f"Failed to save profile '{name}'")
         raise typer.Exit(1)
+
+
+def _perform_switch_update(
+    config: Config,
+    provider: str,
+    is_oauth: bool,
+    token: str,
+    api_url: Optional[str],
+) -> bool:
+    """Perform platform-specific settings update during profile switch.
+
+    OAuth token handling (cross-platform):
+    - macOS: Remove from settings.json (Claude Code reads from Keychain)
+    - Windows/Linux: Write to settings.json (no Keychain available)
+    - Plain API keys: Always write to settings.json
+    """
+    if provider == PROVIDER_ZAI:
+        # Z-AI always needs both URL and token in settings.json
+        env_update = {
+            ENV_ANTHROPIC_BASE_URL: api_url or ZAI_DEFAULT_API_URL,
+            ENV_ANTHROPIC_AUTH_TOKEN: token,
+        }
+        return config.update_claude_settings(env_update)
+
+    # Claude provider
+    if is_oauth:
+        # Platform-specific OAuth handling
+        if sys.platform == "darwin":
+            # macOS: Claude Code stores OAuth in Keychain, settings.json overrides it
+            # Solution: Remove token from settings.json so Keychain is used
+            console.print(
+                "[dim]Note: OAuth managed via macOS Keychain - "
+                "use /login in Claude Code if auth fails[/dim]"
+            )
+            return config.update_claude_settings(
+                {}, remove_keys=[ENV_ANTHROPIC_AUTH_TOKEN, ENV_ANTHROPIC_BASE_URL]
+            )
+        else:
+            # Windows/Linux: No Keychain, OAuth must be in settings.json
+            # Write OAuth token to settings.json (will be parsed to JSON object)
+            env_update = {ENV_ANTHROPIC_AUTH_TOKEN: token}
+            return config.update_claude_settings(
+                env_update, remove_keys=[ENV_ANTHROPIC_BASE_URL]
+            )
+    else:
+        # Plain API key: write to settings.json on all platforms
+        env_update = {ENV_ANTHROPIC_AUTH_TOKEN: token}
+        return config.update_claude_settings(
+            env_update, remove_keys=[ENV_ANTHROPIC_BASE_URL]
+        )
 
 
 @app.command()
@@ -235,7 +373,9 @@ def switch(
     ),
 ):
     """Switch to a different profile (interactive if no name provided)."""
-    show_header("Profile Switch", "Switch between Claude profiles")
+    from .utils import detect_current_provider
+
+    show_header("Profile Switch", "Switch between provider profiles")
 
     storage = get_storage()
     config = get_config()
@@ -245,14 +385,9 @@ def switch(
         show_error("No profiles found. Use 'claude-profile save' to create one.")
         raise typer.Exit(1)
 
-    # Get current profile for transition display
-    active_token = storage.get_active_token(config.get_active_token_path())
-    current_profile = None
-    if active_token:
-        for pname, pdata in profiles.items():
-            if pdata["token"] == active_token:
-                current_profile = pname
-                break
+    # Detect current provider
+    current_info = detect_current_provider()
+    current_provider_name = current_info.get("provider", PROVIDER_CLAUDE)
 
     # Get profile name
     if not name:
@@ -272,42 +407,75 @@ def switch(
         show_error(f"Profile '{name}' not found")
         raise typer.Exit(1)
 
-    # Switch profile with spinner
+    # Get target profile
     profile = profiles[name]
+    target_provider = profile.get("provider", PROVIDER_CLAUDE)
+
+    # CRITICAL: Check provider compatibility
+    if current_info.get("token_present") and current_provider_name != target_provider:
+        show_error(
+            f"Cannot switch between {current_provider_name.upper()} and "
+            f"{target_provider.upper()} profiles!"
+        )
+        console.print()
+        console.print("[yellow]Provider switching requires reconfiguration:[/yellow]")
+        console.print(f"  Current provider: {current_provider_name.upper()}")
+        console.print(f"  Target provider:  {target_provider.upper()}")
+        console.print()
+        console.print("[dim]Different providers use different API endpoints.[/dim]")
+        console.print(
+            "[dim]Create a new profile for the target provider instead:[/dim]"
+        )
+        console.print()
+        console.print(f"  claude-profile save {name}_new --provider {target_provider}")
+        raise typer.Exit(1)
+
+    # Perform the switch
     token = profile["token"]
+    api_url = profile.get("api_url")
 
-    # On macOS, don't pass target_path to ensure keychain write
-    # On other platforms, use the configured path
-    import sys
+    # Check if this is an OAuth token and handle platform-specifically
+    oauth_data = parse_oauth_token(token)
+    is_oauth = oauth_data is not None
 
-    target_path = None if sys.platform == "darwin" else config.get_active_token_path()
+    # Check OAuth expiration if applicable
+    if oauth_data is not None:
+        is_expired, minutes = check_oauth_expiration(oauth_data)
+        if is_expired:
+            console.print(
+                f"[yellow]⚠ Warning: OAuth token expired {abs(minutes)} minutes ago[/yellow]"
+            )
+            console.print(
+                "[dim]After switching, run /login in Claude Code to refresh[/dim]"
+            )
+        elif minutes < 10:
+            console.print(
+                f"[yellow]⚠ OAuth token expires in {minutes} minutes[/yellow]"
+            )
 
     spinner = show_spinner(f"Switching to profile '{name}'...")
     if spinner:
         with spinner:
             time.sleep(0.5)  # Brief delay for visual feedback
-            success = storage.save_active_token(token, target_path)
+            success = _perform_switch_update(
+                config, target_provider, is_oauth, token, api_url
+            )
     else:
-        success = storage.save_active_token(token, target_path)
+        success = _perform_switch_update(
+            config, target_provider, is_oauth, token, api_url
+        )
 
     if success:
-        if current_profile:
-            show_transition(current_profile, name)
         show_success(f"Switched to profile '{name}'")
-
-        # Show profile info in a panel
-        metadata = profile.get("metadata", {})
-        token_display = token if show_tokens else mask_token(token)
-        info = (
-            f"[dim]Description:[/dim] {metadata.get('description', 'No description')}\n"
-            f"[dim]Created:[/dim] {format_timestamp(metadata.get('created'))}\n"
-            f"[dim]Token:[/dim] {token_display}"
+        console.print(f"  Provider: [cyan]{target_provider.upper()}[/cyan]")
+        if api_url:
+            console.print(f"  API URL: [dim]{api_url}[/dim]")
+        console.print()
+        console.print("[dim]Environment updated in ~/.claude/settings.json[/dim]")
+        console.print()
+        console.print(
+            "[yellow]Note:[/yellow] Restart Claude Code to use the new configuration"
         )
-        if should_use_rich():
-            panel = create_panel(info, title=f"Profile: {name}", border_style="success")
-            console.print(panel)
-        else:
-            console.print(info)
     else:
         show_error(f"Failed to switch to profile '{name}'")
         raise typer.Exit(1)
@@ -325,8 +493,8 @@ def list(
         False, "--active-only", help="Show only the active profile"
     ),
 ):
-    """List all saved profiles."""
-    show_header("Profile List", "View all saved Claude profiles")
+    """List all saved profiles grouped by provider."""
+    show_header("Profile List", "View all saved profiles")
 
     storage = get_storage()
     config = get_config()
@@ -334,21 +502,29 @@ def list(
     profiles = storage.list_profiles()
     if not profiles:
         show_info("No profiles found")
+        show_info("Create your first profile:")
+        console.print(
+            "  • Claude: [cyan]claude-profile save <name> --provider claude[/cyan]"
+        )
+        console.print(
+            "  • Z-AI:   [cyan]claude-profile save <name> --provider zai[/cyan]"
+        )
         return
 
-    # Get active token
-    active_token = storage.get_active_token(config.get_active_token_path())
-    active_profile = None
+    # Detect active from settings.json
+    env_vars = config.get_claude_settings_env()
+    active_token = env_vars.get(ENV_ANTHROPIC_AUTH_TOKEN)
+    active_profile_name = None
 
     if active_token:
         for name, data in profiles.items():
-            if data["token"] == active_token:
-                active_profile = name
+            if data.get("token") == active_token:
+                active_profile_name = name
                 break
 
-    if active_only and active_profile:
-        profiles = {active_profile: profiles[active_profile]}
-    elif active_only and not active_profile:
+    if active_only and active_profile_name:
+        profiles = {active_profile_name: profiles[active_profile_name]}
+    elif active_only and not active_profile_name:
         show_info("No active profile found")
         return
 
@@ -356,68 +532,165 @@ def list(
         output = {}
         for name, data in profiles.items():
             output[name] = {
+                "provider": data.get("provider", PROVIDER_CLAUDE),
+                "api_url": data.get("api_url"),
                 "token": data["token"] if show_tokens else mask_token(data["token"]),
                 "metadata": data.get("metadata", {}),
-                "active": name == active_profile,
+                "active": name == active_profile_name,
             }
         console.print(json.dumps(output, indent=2))
     else:
-        table = create_profile_table(profiles, show_tokens, active_profile)
-        if active_profile:
-            active_icon = get_icon("active")
-            console.print(
-                f"[success]{active_icon} Active profile: "
-                f"[bold]{active_profile}[/bold][/success]"
+        # Group profiles by provider
+        claude_profiles = {}
+        zai_profiles = {}
+
+        for name, data in profiles.items():
+            provider = data.get("provider", PROVIDER_CLAUDE)
+            if provider == PROVIDER_ZAI:
+                zai_profiles[name] = data
+            else:
+                claude_profiles[name] = data
+
+        # Display Claude profiles
+        if claude_profiles:
+            console.print("[bold cyan]=== Claude Profiles ===[/bold cyan]\n")
+            table = create_profile_table(
+                claude_profiles, show_tokens, active_profile_name
             )
+            console.print(table)
             console.print()
-        console.print(table)
+
+        # Display Z-AI profiles
+        if zai_profiles:
+            console.print("[bold magenta]=== Z-AI Profiles ===[/bold magenta]\n")
+            # Create Z-AI specific table with API URL column
+            from rich import box
+            from rich.table import Table
+
+            table = Table(
+                box=box.MINIMAL_HEAVY_HEAD,
+                row_styles=["", "dim"] if should_use_rich() else None,
+                show_header=True,
+                header_style="bold cyan",
+            )
+
+            active_icon = get_icon("active")
+            table.add_column("", style="accent", width=3)
+            table.add_column("Name", style="magenta")
+            table.add_column("Description", style="blue")
+            table.add_column("API URL", style="green")
+            table.add_column("Created", style="yellow")
+
+            for name, data in zai_profiles.items():
+                is_active = name == active_profile_name
+                indicator = active_icon if is_active else ""
+                api_url = data.get("api_url", ZAI_DEFAULT_API_URL)
+                metadata = data.get("metadata", {})
+                created = format_timestamp(metadata.get("created", "Unknown"))
+                desc = metadata.get("description", "")
+
+                if is_active and should_use_rich():
+                    table.add_row(
+                        indicator,
+                        f"[bold highlight]{name}[/bold highlight]",
+                        desc,
+                        api_url,
+                        created,
+                        style="highlight",
+                    )
+                else:
+                    table.add_row(indicator, name, desc, api_url, created)
+
+            console.print(table)
+            console.print()
+
+        # Show active profile indicator
+        if active_profile_name:
+            active_profile = profiles[active_profile_name]
+            provider = active_profile.get("provider", PROVIDER_CLAUDE)
+            console.print(
+                f"[success]{get_icon('active')} Active: [bold]{active_profile_name}[/bold] "
+                f"({provider.upper()})[/success]"
+            )
 
 
 @app.command()
 def current():
-    """Show the currently active profile."""
-    show_header("Current Profile", "View active profile details")
+    """Show the currently active provider configuration."""
+    from .utils import detect_current_provider
+
+    show_header("Current Configuration", "View active provider and profile")
 
     storage = get_storage()
     config = get_config()
 
-    active_token = storage.get_active_token(config.get_active_token_path())
-    if not active_token:
-        show_info("No active profile found")
-        return
+    # Detect current provider from settings.json
+    current_info = detect_current_provider()
+    provider = current_info.get("provider", PROVIDER_CLAUDE)
+    base_url = current_info.get("base_url")
+    has_token = current_info.get("token_present", False)
 
-    profiles = storage.list_profiles()
-    active_profile = None
-
-    for name, data in profiles.items():
-        if data["token"] == active_token:
-            active_profile = name
-            break
-
-    if active_profile:
-        profile = profiles[active_profile]
-        metadata = profile.get("metadata", {})
-
+    if not has_token:
         console.print(
             Panel(
-                f"[bold green]Active Profile: {active_profile}[/bold green]\n\n"
-                f"[dim]Description: "
-                f"{metadata.get('description', 'No description')}[/dim]\n"
-                f"[dim]Created: {format_timestamp(metadata.get('created'))}[/dim]\n"
-                f"[dim]Token: {mask_token(active_token)}[/dim]",
-                title="Current Profile",
-                border_style="green",
-            )
-        )
-    else:
-        console.print(
-            Panel(
-                f"[dim]Token: {mask_token(active_token)}[/dim]\n"
-                f"[yellow]This token is not associated with any saved profile[/yellow]",
-                title="Current Token",
+                "[yellow]No active environment configured[/yellow]\n\n"
+                "To get started, create a profile:\n"
+                "  • Claude: [cyan]claude-profile save <name> --provider claude[/cyan]\n"
+                "  • Z-AI:   [cyan]claude-profile save <name> --provider zai[/cyan]",
+                title="No Configuration",
                 border_style="yellow",
             )
         )
+        return
+
+    # Try to match to a saved profile
+    env_vars = config.get_claude_settings_env()
+    active_token = env_vars.get(ENV_ANTHROPIC_AUTH_TOKEN)
+    profiles = storage.list_profiles()
+    active_profile_name = None
+
+    if active_token:
+        for name, data in profiles.items():
+            if data.get("token") == active_token:
+                active_profile_name = name
+                break
+
+    # Build info display
+    info_lines = [
+        f"[bold green]Provider:[/bold green] {provider.upper()}",
+    ]
+
+    if active_profile_name:
+        profile = profiles[active_profile_name]
+        metadata = profile.get("metadata", {})
+        info_lines.append(f"[bold green]Profile:[/bold green] {active_profile_name}")
+        info_lines.append(
+            f"[dim]Description:[/dim] {metadata.get('description', 'No description')}"
+        )
+        info_lines.append(
+            f"[dim]Created:[/dim] {format_timestamp(metadata.get('created'))}"
+        )
+    else:
+        info_lines.append("[yellow]Profile: Not matched to saved profile[/yellow]")
+
+    if base_url:
+        info_lines.append(f"[dim]API URL:[/dim] {base_url}")
+
+    info_lines.append("[dim]Token:[/dim] Token configured ✓")
+
+    info_lines.append("")
+    info_lines.append(
+        "[dim italic]Note: To switch providers, create and switch to a profile\n"
+        "of the desired provider type.[/dim italic]"
+    )
+
+    console.print(
+        Panel(
+            "\n".join(info_lines),
+            title="Current Configuration",
+            border_style="green",
+        )
+    )
 
 
 @app.command()
@@ -599,9 +872,12 @@ def export(
 
     export_data = {}
     for name, data in profiles.items():
+        token = data.get("token", "")
         export_data[name] = {
             "metadata": data.get("metadata", {}),
-            "token": data["token"] if include_tokens else mask_token(data["token"]),
+            "provider": data.get("provider", PROVIDER_CLAUDE),
+            "api_url": data.get("api_url"),
+            "token": token if include_tokens else mask_token(token),
         }
 
     if format.lower() == "yaml":
@@ -694,29 +970,49 @@ def import_profiles(
                 )
                 continue
 
+            provider = (data.get("provider") or PROVIDER_CLAUDE).lower()
+            api_url = data.get("api_url")
             token = data.get("token")
-            if not token or not validate_token(token):
+
+            is_masked = isinstance(token, str) and (
+                "*" in token or token.startswith("OAuth:")
+            )
+            token_valid = False
+            error_msg = ""
+
+            if token and not is_masked:
+                token_valid, error_msg = validate_token(token, provider)
+
+            if not token or is_masked or not token_valid:
+                reason = "masked" if is_masked else "missing or invalid"
                 show_warning(
-                    f"Profile '{profile_name}' has no usable token in the import file"
+                    f"Profile '{profile_name}' has {reason} token in the import file"
                 )
                 if Confirm.ask("Provide the token now?", default=True):
                     token = Prompt.ask(
                         f"Enter token for '{profile_name}'", password=True
                     ).strip()
-                    if not token or not validate_token(token):
+                    token_valid, error_msg = validate_token(token, provider)
+                    if not token or not token_valid:
                         show_warning(
                             f"Skipping profile '{profile_name}' - "
-                            f"provided token invalid"
+                            f"provided token invalid ({error_msg or 'unknown error'})"
                         )
                         continue
                 else:
-                    show_warning(f"Skipping profile '{profile_name}' - token missing")
+                    show_warning(f"Skipping profile '{profile_name}' - token {reason}")
                     continue
 
             metadata = data.get("metadata", {})
             metadata["imported"] = datetime.now().isoformat()
 
-            if storage.save_profile(profile_name, token, metadata):
+            if storage.save_profile(
+                profile_name,
+                token,
+                metadata,
+                provider=provider,
+                api_url=api_url,
+            ):
                 imported_count += 1
                 imported_names.append(profile_name)
                 console.print(f"[green]Imported: {profile_name}[/green]")
@@ -756,15 +1052,35 @@ def show(
         raise typer.Exit(1)
 
     metadata = profile.get("metadata", {})
+    provider = profile.get("provider", PROVIDER_CLAUDE)
+    api_url = profile.get("api_url")
     token_display = profile["token"] if show_token else mask_token(profile["token"])
+
+    info_lines = [
+        f"[bold]Profile: {name}[/bold]",
+        "",
+        f"[bold cyan]Provider:[/bold cyan] {provider.upper()}",
+    ]
+
+    if api_url:
+        info_lines.append(f"[dim]API URL:[/dim] {api_url}")
+
+    info_lines.extend(
+        [
+            f"[dim]Token:[/dim] {token_display}",
+            f"[dim]Created:[/dim] {format_timestamp(metadata.get('created'))}",
+            f"[dim]Description:[/dim] {metadata.get('description', 'No description')}",
+        ]
+    )
+
+    if metadata.get("imported"):
+        info_lines.append(
+            f"[dim]Imported:[/dim] {format_timestamp(metadata.get('imported'))}"
+        )
 
     console.print(
         Panel(
-            f"[bold]Profile: {name}[/bold]\n\n"
-            f"[dim]Token: {token_display}[/dim]\n"
-            f"[dim]Created: {format_timestamp(metadata.get('created'))}[/dim]\n"
-            f"[dim]Description: {metadata.get('description', 'No description')}[/dim]\n"
-            f"[dim]Imported: {format_timestamp(metadata.get('imported'))}[/dim]",
+            "\n".join(info_lines),
             title=f"Profile Details: {name}",
             border_style="blue",
         )

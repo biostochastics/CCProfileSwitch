@@ -1,8 +1,9 @@
 """Configuration management for CC Profile Switch."""
 
 import json
+import tempfile
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     from platformdirs import user_config_dir as platform_user_config_dir
@@ -124,3 +125,99 @@ class Config:
     def get_config_path(self) -> str:
         """Return the configuration directory path."""
         return str(self.config_dir)
+
+    def get_claude_settings_path(self) -> Path:
+        """Get path to Claude Code settings.json file."""
+        return Path.home() / ".claude" / "settings.json"
+
+    def _read_json(self, path: Path) -> dict:
+        """Read JSON file safely, returning {} if not found."""
+        if not path.exists():
+            return {}
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            console.print(f"[yellow]Warning: Could not read {path}: {e}[/yellow]")
+            return {}
+
+    def _write_json_atomic(self, path: Path, data: dict) -> bool:
+        """Write JSON atomically using temp file."""
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                "w", dir=str(path.parent), delete=False, suffix=".json"
+            ) as tmp_file:
+                json.dump(data, tmp_file, indent=2)
+                temp_path = Path(tmp_file.name)
+            temp_path.replace(path)
+            return True
+        except Exception as e:
+            console.print(f"[red]Error writing {path}: {e}[/red]")
+            return False
+
+    def get_claude_settings_env(self) -> dict:
+        """Read environment variables from Claude settings.json."""
+        settings_path = self.get_claude_settings_path()
+        settings = self._read_json(settings_path)
+        return settings.get("env", {})
+
+    def update_claude_settings(
+        self, env_vars: dict, remove_keys: Optional[List[str]] = None
+    ) -> bool:
+        """Update Claude Code settings.json with environment variables.
+
+        Args:
+            env_vars: Dictionary of environment variables to set
+            remove_keys: List of keys to remove from environment
+
+        Returns:
+            True if successful, False otherwise
+        """
+        settings_path = self.get_claude_settings_path()
+
+        # Backup settings if they're malformed
+        settings = self._read_json(settings_path)
+        if settings_path.exists() and not settings:
+            backup_path = settings_path.with_suffix(".json.bak")
+            try:
+                import shutil
+
+                shutil.copy2(settings_path, backup_path)
+                console.print(
+                    f"[yellow]Backed up malformed settings to {backup_path}[/yellow]"
+                )
+            except Exception:
+                pass
+
+        # Ensure env dict exists
+        if "env" not in settings or not isinstance(settings["env"], dict):
+            settings["env"] = {}
+
+        # Update environment variables, converting OAuth JSON strings to objects
+        for key, value in env_vars.items():
+            if key == "ANTHROPIC_AUTH_TOKEN" and isinstance(value, str):
+                # Check if value is a JSON-serialized OAuth token
+                if value.strip().startswith("{"):
+                    try:
+                        # Parse the JSON string to an object so Claude Code can use it
+                        parsed = json.loads(value)
+                        if "claudeAiOauth" in parsed:
+                            settings["env"][key] = parsed
+                        else:
+                            settings["env"][key] = value
+                    except json.JSONDecodeError:
+                        # Not valid JSON, store as-is (probably a plain API key starting with {)
+                        settings["env"][key] = value
+                else:
+                    # Plain API key
+                    settings["env"][key] = value
+            else:
+                settings["env"][key] = value
+
+        # Remove specified keys
+        if remove_keys:
+            for key in remove_keys:
+                settings["env"].pop(key, None)
+
+        return self._write_json_atomic(settings_path, settings)

@@ -7,6 +7,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from .constants import PROVIDER_CLAUDE, PROVIDER_ZAI, ZAI_DEFAULT_API_URL
+
 try:
     from platformdirs import user_config_dir as platform_user_config_dir
 except ImportError:  # pragma: no cover - fallback for minimal environments
@@ -39,12 +41,50 @@ class ProfileStorage:
         """Ensure the configuration directory exists."""
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
+    def _normalize_profile(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize profile data with defaults for backward compatibility."""
+        # Work on a shallow copy to avoid mutating the caller's dict
+        normalized = dict(profile or {})
+
+        # Set default provider if missing
+        normalized.setdefault("provider", PROVIDER_CLAUDE)
+
+        # Set default API URL for Z-AI profiles
+        if normalized["provider"] == PROVIDER_ZAI:
+            normalized.setdefault("api_url", ZAI_DEFAULT_API_URL)
+
+        return normalized
+
     def save_profile(
-        self, name: str, token: str, metadata: Optional[Dict[str, Any]] = None
+        self,
+        name: str,
+        token: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        provider: str = PROVIDER_CLAUDE,
+        api_url: Optional[str] = None,
     ) -> bool:
-        """Save a profile to the keyring."""
+        """Save a profile to the keyring.
+
+        Args:
+            name: Profile name
+            token: API key or auth token
+            metadata: Optional metadata dictionary
+            provider: Provider name ("claude" or "zai")
+            api_url: Optional API URL (defaults to Z-AI URL for zai provider)
+        """
         try:
-            profile_data = {"token": token, "metadata": metadata or {}}
+            profile_data = {
+                "token": token,
+                "provider": provider,
+                "metadata": metadata or {},
+            }
+
+            # Add API URL for Z-AI or custom
+            if provider == PROVIDER_ZAI:
+                profile_data["api_url"] = api_url or ZAI_DEFAULT_API_URL
+            elif api_url:
+                profile_data["api_url"] = api_url
+
             keyring.set_password(
                 self.service_name, f"profile_{name}", json.dumps(profile_data)
             )
@@ -58,7 +98,8 @@ class ProfileStorage:
         try:
             data = keyring.get_password(self.service_name, f"profile_{name}")
             if data:
-                return json.loads(data)
+                profile = json.loads(data)
+                return self._normalize_profile(profile)
             return None
         except Exception as e:
             console.print(f"[red]Error retrieving profile '{name}': {e}[/red]")
@@ -88,7 +129,8 @@ class ProfileStorage:
                 for name in profile_names:
                     profile = self.get_profile(name)
                     if profile:
-                        profiles[name] = profile
+                        # Normalize for backward compatibility
+                        profiles[name] = self._normalize_profile(profile)
         except Exception as e:
             console.print(f"[red]Error listing profiles: {e}[/red]")
         return profiles
@@ -110,9 +152,7 @@ class ProfileStorage:
             console.print(f"[red]Error updating profile list: {e}[/red]")
             return False
 
-    def save_active_token(
-        self, token: str, target_path: Optional[str] = None
-    ) -> bool:
+    def save_active_token(self, token: str, target_path: Optional[str] = None) -> bool:
         """Save the active token to the specified location.
 
         For macOS: Writes OAuth JSON to keychain using security command
@@ -128,8 +168,14 @@ class ProfileStorage:
         import sys
 
         try:
+            force_file_storage = os.getenv("CCPS_FORCE_FILE_STORAGE", "").lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+
             # On macOS, write to keychain to be compatible with Claude Code OAuth
-            if sys.platform == "darwin" and not target_path:
+            if sys.platform == "darwin" and not target_path and not force_file_storage:
                 # Delete existing keychain entry
                 subprocess.run(
                     [
@@ -170,7 +216,7 @@ class ProfileStorage:
 
                 # Write atomically
                 with tempfile.NamedTemporaryFile(
-                    "w", dir=str(target.parent), delete=False
+                    "w", dir=str(target.parent), delete=False, encoding="utf-8"
                 ) as tmp_file:
                     # Store as-is (could be OAuth JSON or plain token)
                     tmp_file.write(token)
@@ -185,19 +231,51 @@ class ProfileStorage:
             return False
 
     def get_active_token(self, target_path: Optional[str] = None) -> Optional[str]:
-        """Get the active token from the specified location."""
+        """Get the active token from the specified location.
+
+        Handles multiple token formats:
+        - Plain string tokens (e.g., 'sk-ant-...')
+        - Legacy JSON format: {"token": "sk-ant-..."}
+        - OAuth JSON format: {"claudeAiOauth": {...}}
+
+        Returns:
+            Token string or None if not found
+        """
         try:
-            if target_path:
-                target = Path(target_path)
-            else:
-                target = self.credentials_file
+            target = (
+                Path(target_path).expanduser() if target_path else self.credentials_file
+            )
 
             if not target.exists():
                 return None
 
-            with open(target, "r") as f:
-                data = json.load(f)
-                return data.get("token")
+            with open(target, "r", encoding="utf-8") as handle:
+                raw_value = handle.read().strip()
+
+            if not raw_value:
+                return None
+
+            # Try to parse as JSON
+            try:
+                parsed = json.loads(raw_value)
+            except json.JSONDecodeError:
+                # Plain token string, return as-is
+                return raw_value
+
+            # Handle different JSON formats
+            if isinstance(parsed, dict):
+                # Legacy format: {"token": "sk-ant-..."}
+                token_value = parsed.get("token")
+                if isinstance(token_value, str):
+                    return token_value
+                # OAuth format: preserve entire JSON structure for Claude Code
+                if "claudeAiOauth" in parsed:
+                    return raw_value
+            elif isinstance(parsed, str):
+                return parsed
+
+            # Fallback: return raw value for any other format
+            return raw_value
         except Exception as e:
             console.print(f"[red]Error reading active token: {e}[/red]")
             return None
