@@ -1,95 +1,58 @@
 # CCProfileSwitch
 
+```
+    ┌─────────────────────┐
+    │   Profile A         │
+    ├─────────────────────┤
+    │        ◄══►         │  Switch
+    ├─────────────────────┤
+    │   Profile B         │
+    └─────────────────────┘
+```
+
 **Switch between Claude Code and Z-AI profiles securely—manage multiple AI providers with isolated configurations.**
 
 [![Version](https://img.shields.io/badge/version-0.2.0-blue)](https://github.com/biostochastics/CCProfileSwitch) [![Python Version](https://img.shields.io/badge/python-3.8.1%2B-blue)](https://www.python.org/downloads/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![pipx](https://img.shields.io/badge/install-pipx-brightgreen)](https://pipx.pypa.io/) [![Typer](https://img.shields.io/badge/CLI-typer-green)](https://typer.tiangolo.com/) [![Rich](https://img.shields.io/badge/UI-rich-orange)](https://rich.readthedocs.io/) [![Keyring](https://img.shields.io/badge/security-keyring-red)](https://github.com/jaraco/keyring) [![DeepWiki](https://img.shields.io/badge/DeepWiki-docs-purple)](https://deepwiki.com/biostochastics/CCProfileSwitch)
 
-## What CCProfileSwitch Does
+## Table of Contents
 
-CCProfileSwitch performs **two simple but essential tasks**:
+- [Overview](#overview)
+- [Quick Start](#quick-start)
+- [Core Concepts](#core-concepts)
+  - [What CCProfileSwitch Does](#what-ccprofileswitch-does)
+  - [System Architecture](#system-architecture)
+  - [OAuth Token Management](#oauth-token-management)
+  - [Provider Isolation](#provider-isolation)
+  - [Z-AI GLM-4.6 Coder Integration](#z-ai-glm-46-coder-integration)
+- [Installation](#installation)
+- [Usage Guide](#usage-guide)
+  - [Starting Your Day](#starting-your-day)
+  - [Context Switching Between Tasks](#context-switching-between-tasks)
+  - [Managing Multiple Clients](#managing-multiple-clients)
+- [Complete CLI Reference](#complete-cli-reference)
+- [Advanced Topics](#advanced-topics)
+  - [Security](#security)
+  - [Configuration](#configuration)
+  - [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [Acknowledgments](#acknowledgments)
+- [License](#license)
 
-1. **Secure Credential Storage**: Stores API keys and tokens in your system's native keyring (Keychain on macOS, Credential Manager on Windows, Secret Service on Linux)
-2. **Environment Configuration**: Updates `~/.claude/settings.json` with the correct provider settings for Claude Code
-
-**That's it.** No shell modifications, no environment variable exports, no complex configuration. Just secure storage and settings file management.
-
-##  Z-AI GLM-4.6 Coder Integration 🚀
-
-**NEW**: CCProfileSwitch now supports [Z-AI's GLM-4.6 Coder](https://z.ai/subscribe?utm_campaign=Platform_Ops&_channel_track_key=DaprgHIc) subscription, offering **3× the usage at 1/7 the cost** compared to Claude's standard pricing.
-
-### Quick Setup for Z-AI
-
-```bash
-# 1. Get your Z-AI API key
-# Visit: https://z.ai/manage-apikey/apikey-list
-
-# 2. (Optional) Set environment variable for auto-detection
-export ZAI_API_KEY="your-zai-api-key-here"
-
-# 3. Create Z-AI profile
-claude-profile save zai-glm46 --provider zai
-
-# 4. Switch to Z-AI
-claude-profile switch zai-glm46
-
-# 5. Verify configuration
-claude-profile current
-```
-
-### What Happens Behind the Scenes
-
-When you create a Z-AI profile, CCProfileSwitch:
-1. Stores your Z-AI API key securely in your system keyring
-2. Updates `~/.claude/settings.json` with:
-   ```json
-   {
-     "env": {
-       "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
-       "ANTHROPIC_AUTH_TOKEN": "your-zai-api-key"
-     }
-   }
-   ```
-3. Claude Code reads these settings and routes requests to Z-AI's API
-
-### Model Mappings
-
-Z-AI GLM-4.6 automatically maps to Claude Code's model environment variables:
-
-- `ANTHROPIC_DEFAULT_OPUS_MODEL` → `GLM-4.6`
-- `ANTHROPIC_DEFAULT_SONNET_MODEL` → `GLM-4.6`
-- `ANTHROPIC_DEFAULT_HAIKU_MODEL` → `GLM-4.5-Air`
-
-You can customize these in `~/.claude/settings.json` if needed. See [Z-AI's Claude Code documentation](https://docs.z.ai/devpack/tool/claude) for details.
-
-### Provider Isolation (Important)
-
-**Claude and Z-AI profiles are completely isolated and CANNOT be switched between directly.**
-
-Why? Different providers require different API endpoints and configurations. Mixing them would cause authentication failures.
-
-**Correct workflow:**
-```bash
-# Create separate profiles for each provider
-claude-profile save work --provider claude         # Claude profile
-claude-profile save zai-work --provider zai        # Z-AI profile
-
-# Switch within same provider: ✓ Works
-claude-profile switch work
-claude-profile switch personal  # (another Claude profile)
-
-# Switch between providers: ✗ Blocked
-claude-profile switch zai-work  # Error: cannot switch from Claude to Z-AI!
-
-# To use Z-AI, create a new profile and switch to it
-claude-profile save zai-current --provider zai
-claude-profile switch zai-current  # ✓ Now using Z-AI
-```
-
-This isolation ensures your API configurations stay correct and prevents accidental mixing of credentials.
-
-## Why CCProfileSwitch?
+## Overview
 
 If you juggle multiple Claude accounts across personal and professional projects, you know the friction: manually re-authenticating, risking context slips where you accidentally use the wrong account, and managing OAuth sessions. CCProfileSwitch eliminates this workflow tax by managing complete authentication profiles in your operating system's secure storage and switching contexts with a single command.
+
+### Key Features
+
+- **Secure Credential Storage**: Stores API keys and OAuth tokens in your system's native keyring (Keychain on macOS, Credential Manager on Windows, Secret Service on Linux)
+- **Environment Configuration**: Updates `~/.claude/settings.json` with the correct provider settings for Claude Code
+- **Multi-Provider Support**: Seamlessly manage both Claude and Z-AI profiles with isolated configurations
+- **OAuth Preservation**: Maintains complete OAuth sessions including refresh tokens and MCP server authentication
+- **Cross-Platform**: Works on macOS, Linux, and Windows with platform-specific optimizations
+
+### What's Different?
+
+**No shell modifications, no environment variable exports, no complex configuration.** Just secure storage and settings file management.
 
 The tool integrates directly with Claude Code's authentication system:
 - **macOS**: Writes complete OAuth credentials (including refresh tokens) to macOS Keychain, preserving MCP server authentication
@@ -98,93 +61,6 @@ The tool integrates directly with Claude Code's authentication system:
 **Important:** Profile switching requires closing and restarting Claude Code to load the new credentials. This is not a mid-session operation—you must exit Claude Code, run `claude-profile switch <name>`, then start Claude Code again.
 
 Whether you're switching between client accounts, separating personal and work usage, or managing team credentials, CCProfileSwitch handles the mechanics so you can focus on your actual work.
-
-## How It Works
-
-CCProfileSwitch stores complete authentication credentials in your system's native secure storage:
-
-**macOS Architecture:**
-- **Profile Storage**: System Keyring (`claude-profile-manager` service)
-  - Stores complete OAuth JSON including `accessToken`, `refreshToken`, `expiresAt`, `scopes`, `subscriptionType`
-  - Preserves MCP server OAuth tokens (`mcpOAuth`)
-  - Profile metadata (description, creation date)
-
-- **Active Session**: macOS Keychain (`Claude Code-credentials` service)
-  - Full OAuth structure written via `security` command
-  - Claude Code reads directly from Keychain
-  - No credential file created on disk (Keychain-only)
-
-**Linux/Windows Architecture:**
-- **Profile Storage**: System credential manager (GNOME Keyring, KWallet, Windows Credential Manager)
-- **Active Session**: `~/.claude/.credentials.json` (file-based)
-
-On first run, it automatically detects your existing Claude Code credentials and imports them as a profile—no manual token entry needed. When you need to switch contexts, you run `claude-profile switch <name>`, and the tool writes that profile's complete authentication to Claude Code's storage. The workflow looks like this:
-
-```bash
-# Morning: Start with client-a work
-$ claude-profile switch client-a
-✔ Switched to profile 'client-a'
-# Now close and restart Claude Code to use client-a credentials
-
-# Run Claude Code tasks for client-a...
-
-# Afternoon: Switch to personal projects (while Claude Code is closed)
-$ claude-profile switch personal
-✔ Switched to profile 'personal'
-# Now start Claude Code to use personal credentials
-
-# Confirm active context
-$ claude-profile current
-● Active profile: personal
-  Description: Personal projects
-  Token: sk-a***
-```
-
-Profile switching is instant, secure, and deterministic. You always know which context is active, and your credentials are stored securely:
-- **macOS**: All credentials in Keychain (OAuth tokens never written to disk)
-- **Linux/Windows**: Active credentials in monitored file, profiles in system credential manager
-
-### OAuth Token Management (Important)
-
-**OAuth tokens expire after approximately 1 hour** and require periodic refresh. CCProfileSwitch handles OAuth tokens differently depending on your platform:
-
-**macOS:**
-- OAuth tokens stored in **macOS Keychain** (service: `Claude Code-credentials`)
-- When switching to OAuth profiles, CCProfileSwitch **removes tokens from settings.json**
-- Why? Claude Code reads from Keychain on macOS, and settings.json overrides it
-- **After switching OAuth profiles**: Run `/login` in Claude Code to refresh the token
-
-**Windows/Linux:**
-- OAuth tokens stored in **settings.json** (no system keychain equivalent)
-- When switching, CCProfileSwitch writes OAuth tokens to settings.json
-- Expiration warnings shown if token is stale
-- **After switching OAuth profiles**: Run `/login` in Claude Code if you see 401 errors
-
-**Plain API Keys (All Platforms):**
-- API keys (`sk-ant-api*`) don't expire
-- Always written to settings.json
-- No `/login` needed after switching
-
-**Recommended Workflow:**
-```bash
-# Switch to OAuth profile
-$ claude-profile switch work
-⚠ OAuth token expired 120 minutes ago
-After switching, run /login in Claude Code to refresh
-✔ Switched to profile 'work'
-
-# Restart Claude Code
-$ # Close and restart Claude Code
-
-# In Claude Code, run /login to refresh OAuth token
-# Then continue working
-```
-
-**Why This Design?**
-- OAuth tokens contain `accessToken`, `refreshToken`, and `expiresAt`
-- Stored tokens in profiles can become stale (especially if profile unused for hours/days)
-- Platform-specific storage (Keychain vs settings.json) requires different handling
-- `/login` command updates platform storage with fresh tokens automatically
 
 ## Quick Start
 
@@ -221,16 +97,254 @@ The `init` command automatically detects your existing Claude Code credentials f
 - **Windows**: `AppData/Roaming/Claude/.credentials.json` or `AppData/Local/Claude/.credentials.json`
 
 **OAuth Support (All Platforms):**
-- ✅ Preserves complete OAuth session including `refreshToken` for seamless authentication
-- ✅ Maintains MCP server OAuth tokens (`mcpOAuth`) for persistent MCP connections
-- ✅ Supports both OAuth tokens (`sk-ant-oat*`, `sk-ant-ort*`) and API keys (`sk-ant-api*`)
-- ✅ Works on macOS (Keychain - tested), Linux (.credentials.json), and Windows (credential files)
+- Preserves complete OAuth session including `refreshToken` for seamless authentication
+- Maintains MCP server OAuth tokens (`mcpOAuth`) for persistent MCP connections
+- Supports both OAuth tokens (`sk-ant-oat*`, `sk-ant-ort*`) and API keys (`sk-ant-api*`)
+- Works on macOS (Keychain - tested), Linux (.credentials.json), and Windows (credential files)
 
 > **Note**: OAuth preservation has been verified on macOS. Linux/Windows OAuth support is implemented and should work correctly, but has not been tested on those platforms yet. Please report any issues!
 
 After setup, you must close and restart Claude Code to use the active profile's credentials.
 
-## Common Workflows
+## Core Concepts
+
+### What CCProfileSwitch Does
+
+CCProfileSwitch performs **two simple but essential tasks**:
+
+1. **Secure Credential Storage**: Stores API keys and tokens in your system's native keyring (Keychain on macOS, Credential Manager on Windows, Secret Service on Linux)
+2. **Environment Configuration**: Updates `~/.claude/settings.json` with the correct provider settings for Claude Code
+
+**That's it.** No shell modifications, no environment variable exports, no complex configuration. Just secure storage and settings file management.
+
+### System Architecture
+
+CCProfileSwitch stores complete authentication credentials in your system's native secure storage with platform-specific optimizations.
+
+#### macOS Architecture
+
+- **Profile Storage**: System Keyring (`claude-profile-manager` service)
+  - Stores complete OAuth JSON including `accessToken`, `refreshToken`, `expiresAt`, `scopes`, `subscriptionType`
+  - Preserves MCP server OAuth tokens (`mcpOAuth`)
+  - Profile metadata (description, creation date)
+
+- **Active Session**: macOS Keychain (`Claude Code-credentials` service)
+  - Full OAuth structure written via `security` command
+  - Claude Code reads directly from Keychain
+  - No credential file created on disk (Keychain-only)
+
+#### Linux/Windows Architecture
+
+- **Profile Storage**: System credential manager (GNOME Keyring, KWallet, Windows Credential Manager)
+- **Active Session**: `~/.claude/.credentials.json` (file-based)
+
+#### Workflow
+
+On first run, it automatically detects your existing Claude Code credentials and imports them as a profile—no manual token entry needed. When you need to switch contexts, you run `claude-profile switch <name>`, and the tool writes that profile's complete authentication to Claude Code's storage. The workflow looks like this:
+
+```bash
+# Morning: Start with client-a work
+$ claude-profile switch client-a
+✔ Switched to profile 'client-a'
+# Now close and restart Claude Code to use client-a credentials
+
+# Run Claude Code tasks for client-a...
+
+# Afternoon: Switch to personal projects (while Claude Code is closed)
+$ claude-profile switch personal
+✔ Switched to profile 'personal'
+# Now start Claude Code to use personal credentials
+
+# Confirm active context
+$ claude-profile current
+● Active profile: personal
+  Description: Personal projects
+  Token: sk-a***
+```
+
+Profile switching is instant, secure, and deterministic. You always know which context is active, and your credentials are stored securely:
+- **macOS**: All credentials in Keychain (OAuth tokens never written to disk)
+- **Linux/Windows**: Active credentials in monitored file, profiles in system credential manager
+
+### OAuth Token Management
+
+**OAuth tokens expire after approximately 1 hour** and require periodic refresh. CCProfileSwitch handles OAuth tokens differently depending on your platform:
+
+#### macOS
+
+- OAuth tokens stored in **macOS Keychain** (service: `Claude Code-credentials`)
+- When switching to OAuth profiles, CCProfileSwitch **removes tokens from settings.json**
+- Why? Claude Code reads from Keychain on macOS, and settings.json overrides it
+- **After switching OAuth profiles**: Run `/login` in Claude Code to refresh the token
+
+#### Windows/Linux
+
+- OAuth tokens stored in **settings.json** (no system keychain equivalent)
+- When switching, CCProfileSwitch writes OAuth tokens to settings.json
+- Expiration warnings shown if token is stale
+- **After switching OAuth profiles**: Run `/login` in Claude Code if you see 401 errors
+
+#### Plain API Keys (All Platforms)
+
+- API keys (`sk-ant-api*`) don't expire
+- Always written to settings.json
+- No `/login` needed after switching
+
+#### Recommended Workflow
+
+```bash
+# Switch to OAuth profile
+$ claude-profile switch work
+⚠ OAuth token expired 120 minutes ago
+After switching, run /login in Claude Code to refresh
+✔ Switched to profile 'work'
+
+# Restart Claude Code
+$ # Close and restart Claude Code
+
+# In Claude Code, run /login to refresh OAuth token
+# Then continue working
+```
+
+#### Why This Design?
+
+- OAuth tokens contain `accessToken`, `refreshToken`, and `expiresAt`
+- Stored tokens in profiles can become stale (especially if profile unused for hours/days)
+- Platform-specific storage (Keychain vs settings.json) requires different handling
+- `/login` command updates platform storage with fresh tokens automatically
+
+### Provider Isolation
+
+**Claude and Z-AI profiles are completely isolated and CANNOT be switched between directly.**
+
+Why? Different providers require different API endpoints and configurations. Mixing them would cause authentication failures.
+
+#### Correct Workflow
+
+```bash
+# Create separate profiles for each provider
+claude-profile save work --provider claude         # Claude profile
+claude-profile save zai-work --provider zai        # Z-AI profile
+
+# Switch within same provider: ✓ Works
+claude-profile switch work
+claude-profile switch personal  # (another Claude profile)
+
+# Switch between providers: ✗ Blocked
+claude-profile switch zai-work  # Error: cannot switch from Claude to Z-AI!
+
+# To use Z-AI, create a new profile and switch to it
+claude-profile save zai-current --provider zai
+claude-profile switch zai-current  # ✓ Now using Z-AI
+```
+
+This isolation ensures your API configurations stay correct and prevents accidental mixing of credentials.
+
+### Z-AI GLM-4.6 Coder Integration
+
+CCProfileSwitch now supports [Z-AI's GLM-4.6 Coder](https://z.ai/subscribe?utm_campaign=Platform_Ops&_channel_track_key=DaprgHIc) subscription, offering **3× the usage at 1/7 the cost** compared to Claude's standard pricing.
+
+#### Quick Setup for Z-AI
+
+```bash
+# 1. Get your Z-AI API key
+# Visit: https://z.ai/manage-apikey/apikey-list
+
+# 2. (Optional) Set environment variable for auto-detection
+export ZAI_API_KEY="your-zai-api-key-here"
+
+# 3. Create Z-AI profile
+claude-profile save zai-glm46 --provider zai
+
+# 4. Switch to Z-AI
+claude-profile switch zai-glm46
+
+# 5. Verify configuration
+claude-profile current
+```
+
+#### What Happens Behind the Scenes
+
+When you create a Z-AI profile, CCProfileSwitch:
+1. Stores your Z-AI API key securely in your system keyring
+2. Updates `~/.claude/settings.json` with:
+   ```json
+   {
+     "env": {
+       "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+       "ANTHROPIC_AUTH_TOKEN": "your-zai-api-key"
+     }
+   }
+   ```
+3. Claude Code reads these settings and routes requests to Z-AI's API
+
+#### Model Mappings
+
+Z-AI GLM-4.6 automatically maps to Claude Code's model environment variables:
+
+- `ANTHROPIC_DEFAULT_OPUS_MODEL` → `GLM-4.6`
+- `ANTHROPIC_DEFAULT_SONNET_MODEL` → `GLM-4.6`
+- `ANTHROPIC_DEFAULT_HAIKU_MODEL` → `GLM-4.5-Air`
+
+You can customize these in `~/.claude/settings.json` if needed. See [Z-AI's Claude Code documentation](https://docs.z.ai/devpack/tool/claude) for details.
+
+## Installation
+
+### Using pipx (Recommended for Daily Use)
+
+Install globally without affecting your system Python:
+
+```bash
+git clone https://github.com/biostochastics/CCProfileSwitch.git
+cd CCProfileSwitch
+
+# Install pipx if needed
+brew install pipx  # macOS
+# or: pip install --user pipx  # Linux/Windows
+
+# Install CCProfileSwitch globally
+pipx install .
+
+# Now works from anywhere without poetry run
+claude-profile --help
+claude-profile init
+```
+
+### Using Poetry (Recommended for Development)
+
+```bash
+git clone https://github.com/biostochastics/CCProfileSwitch.git
+cd CCProfileSwitch
+poetry install
+
+# Option 1: Use poetry run before each command
+poetry run claude-profile --help
+
+# Option 2: Activate virtual environment once
+poetry shell
+claude-profile --help  # Now works without poetry run
+```
+
+### Shell Alias (Quick Setup)
+
+Add to `~/.zshrc` or `~/.bashrc`:
+
+```bash
+alias claude-profile='poetry -C /Users/YOUR_USERNAME/CCProfileSwitch run claude-profile'
+```
+
+Then reload: `source ~/.zshrc`
+
+### Future: PyPI Installation
+
+Once published to PyPI:
+
+```bash
+pip install cc-profile-switch
+claude-profile --help
+```
+
+## Usage Guide
 
 ### Starting Your Day
 
@@ -294,171 +408,7 @@ $ claude-profile switch client-b
 
 Profiles persist in your system keyring, so they survive reboots and are isolated from other users.
 
-## Installation
-
-### Using pipx (Recommended for Daily Use)
-
-Install globally without affecting your system Python:
-
-```bash
-git clone https://github.com/biostochastics/CCProfileSwitch.git
-cd CCProfileSwitch
-
-# Install pipx if needed
-brew install pipx  # macOS
-# or: pip install --user pipx  # Linux/Windows
-
-# Install CCProfileSwitch globally
-pipx install .
-
-# Now works from anywhere without poetry run
-claude-profile --help
-claude-profile init
-```
-
-### Using Poetry (Recommended for Development)
-
-```bash
-git clone https://github.com/biostochastics/CCProfileSwitch.git
-cd CCProfileSwitch
-poetry install
-
-# Option 1: Use poetry run before each command
-poetry run claude-profile --help
-
-# Option 2: Activate virtual environment once
-poetry shell
-claude-profile --help  # Now works without poetry run
-```
-
-### Shell Alias (Quick Setup)
-
-Add to `~/.zshrc` or `~/.bashrc`:
-
-```bash
-alias claude-profile='poetry -C /Users/YOUR_USERNAME/CCProfileSwitch run claude-profile'
-```
-
-Then reload: `source ~/.zshrc`
-
-### Future: PyPI Installation
-
-Once published to PyPI:
-
-```bash
-pip install cc-profile-switch
-claude-profile --help
-```
-
-## Security
-
-CCProfileSwitch stores authentication credentials in your operating system's secure credential storage with platform-specific optimizations.
-
-**Credential Storage by Platform:**
-
-**macOS (Keychain-Only):**
-- **Profile Storage**: System Keyring service `claude-profile-manager`
-  - AES-128 encryption via macOS Keychain
-  - Stores complete OAuth JSON (accessToken, refreshToken, expiresAt, scopes, mcpOAuth)
-- **Active Session**: Keychain service `Claude Code-credentials`
-  - Written via `security` command for Claude Code compatibility
-  - **No credential file created** - fully Keychain-based
-  - Preserves refresh tokens for persistent authentication
-  - Maintains MCP server OAuth tokens
-
-**Windows:**
-- Profile Storage: Credential Manager with DPAPI encryption
-- Active Session: File at `AppData/Roaming/Claude/.credentials.json` (0600 permissions)
-
-**Linux:**
-- Profile Storage: Secret Service (GNOME Keyring / KWallet) with libsecret
-- Active Session: File at `~/.claude/.credentials.json` (0600 permissions)
-
-**Auto-Detection & OAuth Support:**
-- Automatically detects existing Claude Code credentials on first run
-- **All Platforms**: Reads complete OAuth structure, including:
-  - `accessToken` (sk-ant-oat*) - Active authentication token
-  - `refreshToken` (sk-ant-ort*) - Token refresh capability
-  - `expiresAt`, `scopes`, `subscriptionType` - Session metadata
-  - `mcpOAuth` - MCP server authentication tokens
-- **macOS**: Reads from Keychain service `Claude Code-credentials`
-- **Linux/Windows**: Reads from credential files (`~/.claude/.credentials.json`, etc.)
-- Supports both OAuth tokens and API keys (sk-ant-api*)
-
-**What's Protected:**
-- **All credentials encrypted** in system-native credential storage
-- Concurrent access protected by file locking (5-second timeout)
-- Token format validation enforces `sk-ant-*` pattern
-- Atomic writes prevent partial credential updates
-- **All Platforms**: Complete OAuth structure preserved (never loses refresh tokens or MCP auth)
-
-**What's Not Protected:**
-- **macOS**: All credentials stay in Keychain (maximum security - no plaintext files)
-- **Linux/Windows**: Active credential file contains plaintext OAuth JSON for Claude Code compatibility (0600 permissions)
-- Exported backups with `--include-tokens` flag contain plaintext tokens (user must encrypt)
-
-For shared or multi-user systems, verify security with `claude-profile doctor`. Each user's credential storage is isolated.
-
-When exporting profiles with `--include-tokens` for backup or migration, immediately encrypt the export file:
-
-```bash
-# Export with tokens
-$ claude-profile export backup.json --include-tokens
-
-# Encrypt immediately
-$ gpg -c backup.json
-$ rm backup.json  # Delete plaintext
-
-# Later: decrypt and import
-$ gpg -d backup.json.gpg | claude-profile import-profiles /dev/stdin
-```
-
-## Configuration
-
-CCProfileSwitch requires minimal configuration. The tool automatically detects your system's keyring and creates necessary directories.
-
-**Storage Locations:**
-
-| Platform | Profile Storage | Active Session | OAuth Support |
-|----------|----------------|----------------|---------------|
-| **macOS** | System Keyring (`claude-profile-manager`) | Keychain (`Claude Code-credentials`) | ✅ Full OAuth (tested) |
-| **Windows** | Credential Manager (DPAPI) | `AppData/Roaming/Claude/.credentials.json` | ✅ Full OAuth (untested) |
-| **Linux** | Secret Service (libsecret) | `~/.claude/.credentials.json` | ✅ Full OAuth (untested) |
-
-> **Testing Status**: macOS OAuth support has been verified. Windows/Linux implementations are complete but await real-world testing.
-
-**macOS Architecture Details:**
-- Profiles: System Keyring stores `{"token": "{OAuth JSON}", "metadata": {...}}`
-- Active: Keychain stores raw OAuth JSON via `security add-generic-password`
-- Result: No credential files on disk, complete OAuth preservation
-
-**Environment Variables:**
-
-```bash
-# Disable colors and animations (accessibility)
-export NO_COLOR=1
-export CCPS_NO_COLOR=1
-
-# Force ASCII icons (no Unicode)
-export CCPS_ASCII=1
-
-# Override credential file location (advanced)
-export CLAUDE_CREDENTIALS_PATH=~/.config/claude/credentials.json
-```
-
-**Keyring Backends:**
-
-CCProfileSwitch uses the `keyring` library, which automatically selects the appropriate backend. Check your backend with:
-
-```bash
-$ claude-profile doctor
-Keyring Check:
-✓ Keyring accessible: keyring.backends.macOS.Keychain
-```
-
-If no secure backend is available (rare), the tool will warn and suggest installing a keyring provider for your system.
-
-## CLI Reference (Appendix)
+## Complete CLI Reference
 
 ### Global Options
 
@@ -467,9 +417,10 @@ If no secure backend is available (rare), the tool will warn and suggest install
 | `--help` | Show help message |
 | `--install-completion` | Install shell completion |
 
-### Commands
+### Profile Management Commands
 
-**`claude-profile init`** - Initialize profile manager with guided setup
+#### `claude-profile init`
+Initialize profile manager with guided setup
 
 ```bash
 claude-profile init
@@ -479,22 +430,27 @@ Sets up credential storage location, imports existing tokens if found, and creat
 
 ---
 
-**`claude-profile save <name>`** - Save a new profile
+#### `claude-profile save <name>`
+Save a new profile
 
 ```bash
 claude-profile save work
 claude-profile save personal --description "Personal projects"
+claude-profile save zai-work --provider zai
 ```
 
 Options:
 - `--token, -t` - Provide token directly (will prompt if not provided)
 - `--description, -d` - Profile description
+- `--provider, -p` - Provider: `claude` or `zai` (default: claude)
+- `--api-url` - Custom API URL (defaults to Z-AI for zai provider)
 - `--active/--no-active` - Set as active after saving (default: true)
 - `--overwrite/--no-overwrite` - Overwrite existing profile
 
 ---
 
-**`claude-profile switch [name]`** - Switch to a different profile
+#### `claude-profile switch [name]`
+Switch to a different profile
 
 ```bash
 claude-profile switch work          # Switch to specific profile
@@ -508,7 +464,8 @@ Options:
 
 ---
 
-**`claude-profile list`** - List all saved profiles
+#### `claude-profile list`
+List all saved profiles grouped by provider
 
 ```bash
 claude-profile list
@@ -523,17 +480,19 @@ Options:
 
 ---
 
-**`claude-profile current`** - Show currently active profile
+#### `claude-profile current`
+Show currently active provider configuration
 
 ```bash
 claude-profile current
 ```
 
-Displays active profile name, description, creation date, and masked token.
+Displays active profile name, provider, description, creation date, and masked token.
 
 ---
 
-**`claude-profile cycle`** - Cycle through available profiles
+#### `claude-profile cycle`
+Cycle through available profiles
 
 ```bash
 claude-profile cycle
@@ -543,7 +502,8 @@ Activates the next profile in alphabetical order. Useful for quick switching bet
 
 ---
 
-**`claude-profile delete <name>`** - Delete a profile
+#### `claude-profile delete <name>`
+Delete a profile
 
 ```bash
 claude-profile delete old-profile
@@ -555,7 +515,8 @@ Options:
 
 ---
 
-**`claude-profile rename <old> <new>`** - Rename a profile
+#### `claude-profile rename <old> <new>`
+Rename a profile
 
 ```bash
 claude-profile rename personal personal-projects
@@ -563,7 +524,21 @@ claude-profile rename personal personal-projects
 
 ---
 
-**`claude-profile export [file]`** - Export profiles to backup file
+#### `claude-profile show <name>`
+Show profile details
+
+```bash
+claude-profile show work
+claude-profile show work --show-token
+```
+
+Options:
+- `--show-token` - Show full token (masked by default)
+
+### Backup and Import Commands
+
+#### `claude-profile export [file]`
+Export profiles to backup file
 
 ```bash
 claude-profile export backup.json
@@ -575,11 +550,24 @@ Options:
 - `--include-tokens` - Include actual tokens (use with caution)
 - `--export-format` - Format: `json` or `yaml`
 
-**Security Warning:** Exported files with `--include-tokens` contain plaintext tokens. Encrypt immediately.
+**Security Warning:** Exported files with `--include-tokens` contain plaintext tokens. Encrypt immediately:
+
+```bash
+# Export with tokens
+$ claude-profile export backup.json --include-tokens
+
+# Encrypt immediately
+$ gpg -c backup.json
+$ rm backup.json  # Delete plaintext
+
+# Later: decrypt and import
+$ gpg -d backup.json.gpg | claude-profile import-profiles /dev/stdin
+```
 
 ---
 
-**`claude-profile import-profiles <file>`** - Import profiles from backup
+#### `claude-profile import-profiles <file>`
+Import profiles from backup
 
 ```bash
 claude-profile import-profiles backup.json
@@ -592,21 +580,10 @@ Options:
 - `--replace` - Replace all existing profiles
 - `--prefix` - Add prefix to imported profile names
 
----
+### Diagnostics
 
-**`claude-profile show <name>`** - Show profile details
-
-```bash
-claude-profile show work
-claude-profile show work --show-token
-```
-
-Options:
-- `--show-token` - Show full token (masked by default)
-
----
-
-**`claude-profile doctor`** - System diagnostics
+#### `claude-profile doctor`
+System diagnostics
 
 ```bash
 claude-profile doctor
@@ -629,9 +606,112 @@ Profiles Check:
 
 The warning about missing file is **normal on macOS** - authentication is stored in Keychain, not files.
 
-## Troubleshooting
+## Advanced Topics
 
-**No secure keyring backend available**
+### Security
+
+CCProfileSwitch stores authentication credentials in your operating system's secure credential storage with platform-specific optimizations.
+
+#### Credential Storage by Platform
+
+**macOS (Keychain-Only):**
+- **Profile Storage**: System Keyring service `claude-profile-manager`
+  - AES-128 encryption via macOS Keychain
+  - Stores complete OAuth JSON (accessToken, refreshToken, expiresAt, scopes, mcpOAuth)
+- **Active Session**: Keychain service `Claude Code-credentials`
+  - Written via `security` command for Claude Code compatibility
+  - **No credential file created** - fully Keychain-based
+  - Preserves refresh tokens for persistent authentication
+  - Maintains MCP server OAuth tokens
+
+**Windows:**
+- Profile Storage: Credential Manager with DPAPI encryption
+- Active Session: File at `AppData/Roaming/Claude/.credentials.json` (0600 permissions)
+
+**Linux:**
+- Profile Storage: Secret Service (GNOME Keyring / KWallet) with libsecret
+- Active Session: File at `~/.claude/.credentials.json` (0600 permissions)
+
+#### Auto-Detection and OAuth Support
+
+- Automatically detects existing Claude Code credentials on first run
+- **All Platforms**: Reads complete OAuth structure, including:
+  - `accessToken` (sk-ant-oat*) - Active authentication token
+  - `refreshToken` (sk-ant-ort*) - Token refresh capability
+  - `expiresAt`, `scopes`, `subscriptionType` - Session metadata
+  - `mcpOAuth` - MCP server authentication tokens
+- **macOS**: Reads from Keychain service `Claude Code-credentials`
+- **Linux/Windows**: Reads from credential files (`~/.claude/.credentials.json`, etc.)
+- Supports both OAuth tokens and API keys (sk-ant-api*)
+
+#### What's Protected
+
+- **All credentials encrypted** in system-native credential storage
+- Concurrent access protected by file locking (5-second timeout)
+- Token format validation enforces `sk-ant-*` pattern
+- Atomic writes prevent partial credential updates
+- **All Platforms**: Complete OAuth structure preserved (never loses refresh tokens or MCP auth)
+
+#### What's Not Protected
+
+- **macOS**: All credentials stay in Keychain (maximum security - no plaintext files)
+- **Linux/Windows**: Active credential file contains plaintext OAuth JSON for Claude Code compatibility (0600 permissions)
+- Exported backups with `--include-tokens` flag contain plaintext tokens (user must encrypt)
+
+For shared or multi-user systems, verify security with `claude-profile doctor`. Each user's credential storage is isolated.
+
+### Configuration
+
+CCProfileSwitch requires minimal configuration. The tool automatically detects your system's keyring and creates necessary directories.
+
+#### Storage Locations
+
+| Platform | Profile Storage | Active Session | OAuth Support |
+|----------|----------------|----------------|---------------|
+| **macOS** | System Keyring (`claude-profile-manager`) | Keychain (`Claude Code-credentials`) | Full OAuth (tested) |
+| **Windows** | Credential Manager (DPAPI) | `AppData/Roaming/Claude/.credentials.json` | Full OAuth (untested) |
+| **Linux** | Secret Service (libsecret) | `~/.claude/.credentials.json` | Full OAuth (untested) |
+
+> **Testing Status**: macOS OAuth support has been verified. Windows/Linux implementations are complete but await real-world testing.
+
+#### macOS Architecture Details
+
+- Profiles: System Keyring stores `{"token": "{OAuth JSON}", "metadata": {...}}`
+- Active: Keychain stores raw OAuth JSON via `security add-generic-password`
+- Result: No credential files on disk, complete OAuth preservation
+
+#### Environment Variables
+
+```bash
+# Disable colors and animations (accessibility)
+export NO_COLOR=1
+export CCPS_NO_COLOR=1
+
+# Force ASCII icons (no Unicode)
+export CCPS_ASCII=1
+
+# Override credential file location (advanced)
+export CLAUDE_CREDENTIALS_PATH=~/.config/claude/credentials.json
+
+# Force file-based storage instead of Keychain (testing only)
+export CCPS_FORCE_FILE_STORAGE=1
+```
+
+#### Keyring Backends
+
+CCProfileSwitch uses the `keyring` library, which automatically selects the appropriate backend. Check your backend with:
+
+```bash
+$ claude-profile doctor
+Keyring Check:
+✓ Keyring accessible: keyring.backends.macOS.Keychain
+```
+
+If no secure backend is available (rare), the tool will warn and suggest installing a keyring provider for your system.
+
+### Troubleshooting
+
+#### No secure keyring backend available
 
 ```bash
 # Linux: Install keyring backend
@@ -642,12 +722,12 @@ sudo apt-get install kwalletmanager # KDE
 claude-profile doctor
 ```
 
-**KeyringLocked error**
+#### KeyringLocked error
 
-macOS: Unlock Keychain in System Preferences → Passwords
-Linux: Keyring usually unlocks automatically on login
+- **macOS**: Unlock Keychain in System Preferences → Passwords
+- **Linux**: Keyring usually unlocks automatically on login
 
-**Permission issues**
+#### Permission issues
 
 ```bash
 # Check permissions
@@ -660,7 +740,7 @@ chmod 600 ~/.claude/.credentials.json
 claude-profile doctor
 ```
 
-**Profile not switching**
+#### Profile not switching
 
 ```bash
 # Verify profile exists
@@ -683,6 +763,30 @@ cat ~/.claude/.credentials.json
 ```
 
 **macOS Note:** If `doctor` shows "Token found in macOS Keychain" but Claude Code doesn't authenticate, close and restart Claude Code to reload the Keychain credentials.
+
+#### OAuth token expired
+
+```bash
+# Switch to profile
+claude-profile switch work
+
+# If you see expiration warning, restart Claude Code and run /login
+# This refreshes the OAuth token in Keychain/settings.json
+```
+
+#### Provider switching blocked
+
+If you see an error about switching between Claude and Z-AI:
+
+```bash
+# Create a new profile for the target provider
+claude-profile save new-profile --provider zai  # or claude
+
+# Switch to the new profile
+claude-profile switch new-profile
+```
+
+Remember: Provider isolation prevents accidental mixing of credentials. This is by design.
 
 ## Development
 
