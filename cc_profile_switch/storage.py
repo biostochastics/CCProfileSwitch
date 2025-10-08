@@ -90,7 +90,7 @@ class ProfileStorage:
             )
             return True
         except Exception as e:
-            console.print(f"[red]Error saving profile '{name}': {e}[/red]")
+            console.print(f"[red]Error saving profile '{name}': {type(e).__name__}[/red]")
             return False
 
     def get_profile(self, name: str) -> Optional[Dict[str, Any]]:
@@ -102,7 +102,7 @@ class ProfileStorage:
                 return self._normalize_profile(profile)
             return None
         except Exception as e:
-            console.print(f"[red]Error retrieving profile '{name}': {e}[/red]")
+            console.print(f"[red]Error retrieving profile '{name}': {type(e).__name__}[/red]")
             return None
 
     def delete_profile(self, name: str) -> bool:
@@ -114,7 +114,7 @@ class ProfileStorage:
             console.print(f"[yellow]Profile '{name}' not found[/yellow]")
             return False
         except Exception as e:
-            console.print(f"[red]Error deleting profile '{name}': {e}[/red]")
+            console.print(f"[red]Error deleting profile '{name}': {type(e).__name__}[/red]")
             return False
 
     def list_profiles(self) -> Dict[str, Dict[str, Any]]:
@@ -132,7 +132,7 @@ class ProfileStorage:
                         # Normalize for backward compatibility
                         profiles[name] = self._normalize_profile(profile)
         except Exception as e:
-            console.print(f"[red]Error listing profiles: {e}[/red]")
+            console.print(f"[red]Error listing profiles: {type(e).__name__}[/red]")
         return profiles
 
     def update_profile_list(self, profile_names: list) -> bool:
@@ -149,7 +149,7 @@ class ProfileStorage:
                 )
             return True
         except Exception as e:
-            console.print(f"[red]Error updating profile list: {e}[/red]")
+            console.print(f"[red]Error updating profile list: {type(e).__name__}[/red]")
             return False
 
     def save_active_token(self, token: str, target_path: Optional[str] = None) -> bool:
@@ -182,12 +182,19 @@ class ProfileStorage:
                     keyring.set_password("Claude Code-credentials", os.environ.get("USER", ""), token)
                     return True
                 except Exception as e:
-                    console.print(f"[red]Keyring write failed: {e}[/red]")
+                    console.print(f"[red]Keyring write failed: {type(e).__name__}[/red]")
                     return False
             else:
                 # File-based storage for Linux/Windows or explicit path
                 if target_path:
-                    target = Path(target_path).expanduser()
+                    from .utils import validate_safe_path
+
+                    # Validate path for security
+                    is_valid, error_msg, validated_path = validate_safe_path(target_path)
+                    if not is_valid:
+                        console.print(f"[red]Invalid target path: {error_msg}[/red]")
+                        return False
+                    target = validated_path
                     target.parent.mkdir(parents=True, exist_ok=True)
                 else:
                     self.ensure_config_dir()
@@ -200,13 +207,13 @@ class ProfileStorage:
                     # Store as-is (could be OAuth JSON or plain token)
                     tmp_file.write(token)
                     temp_path = Path(tmp_file.name)
-                temp_path.replace(target)
 
-                # Set secure permissions (0600)
-                os.chmod(target, stat.S_IRUSR | stat.S_IWUSR)
+                # Set secure permissions (0600) BEFORE moving to prevent race condition
+                os.chmod(temp_path, stat.S_IRUSR | stat.S_IWUSR)
+                temp_path.replace(target)
                 return True
         except Exception as e:
-            console.print(f"[red]Error saving active token: {e}[/red]")
+            console.print(f"[red]Error saving active token: {type(e).__name__}[/red]")
             return False
 
     def get_active_token(self, target_path: Optional[str] = None) -> Optional[str]:
@@ -217,10 +224,35 @@ class ProfileStorage:
         - Legacy JSON format: {"token": "sk-ant-..."}
         - OAuth JSON format: {"claudeAiOauth": {...}}
 
+        For macOS: Reads from keychain first (symmetric with save_active_token)
+        For other platforms: Reads from file
+
         Returns:
             Token string or None if not found
         """
+        import sys
+
         try:
+            # On macOS, try keychain first (symmetric with save_active_token)
+            if sys.platform == "darwin" and not target_path:
+                force_file_storage = os.getenv("CCPS_FORCE_FILE_STORAGE", "").lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                )
+                if not force_file_storage:
+                    try:
+                        # Read from keychain using keyring library
+                        keychain_data = keyring.get_password(
+                            "Claude Code-credentials", os.environ.get("USER", "")
+                        )
+                        if keychain_data:
+                            return keychain_data
+                    except Exception:
+                        # Fall through to file-based reading
+                        pass
+
+            # File-based reading (Linux/Windows or explicit path or keychain fallback)
             target = (
                 Path(target_path).expanduser() if target_path else self.credentials_file
             )
@@ -256,7 +288,7 @@ class ProfileStorage:
             # Fallback: return raw value for any other format
             return raw_value
         except Exception as e:
-            console.print(f"[red]Error reading active token: {e}[/red]")
+            console.print(f"[red]Error reading active token: {type(e).__name__}[/red]")
             return None
 
     def get_config_path(self) -> str:
@@ -281,5 +313,5 @@ class ProfileStorage:
             keyring.delete_password(self.service_name, test_key)
             return retrieved == test_value
         except Exception as e:
-            console.print(f"[red]Keyring access test failed: {e}[/red]")
+            console.print(f"[red]Keyring access test failed: {type(e).__name__}[/red]")
             return False
