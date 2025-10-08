@@ -164,7 +164,6 @@ class ProfileStorage:
             target_path: Optional file path (used only for non-macOS or when
                 explicitly specified)
         """
-        import subprocess
         import sys
 
         try:
@@ -176,35 +175,15 @@ class ProfileStorage:
 
             # On macOS, write to keychain to be compatible with Claude Code OAuth
             if sys.platform == "darwin" and not target_path and not force_file_storage:
-                # Delete existing keychain entry
-                subprocess.run(
-                    [
-                        "security",
-                        "delete-generic-password",
-                        "-a",
-                        os.environ.get("USER", ""),
-                        "-s",
-                        "Claude Code-credentials",
-                    ],
-                    capture_output=True,
-                )
-
-                # Add new keychain entry with OAuth data
-                result = subprocess.run(
-                    [
-                        "security",
-                        "add-generic-password",
-                        "-a",
-                        os.environ.get("USER", ""),
-                        "-s",
-                        "Claude Code-credentials",
-                        "-w",
-                        token,
-                    ],
-                    capture_output=True,
-                    check=True,
-                )
-                return result.returncode == 0
+                try:
+                    # Use keyring library to avoid repeated authorization prompts
+                    # Note: This writes to the profile manager keyring, not Claude Code's keychain
+                    # Claude Code manages its own OAuth via /login
+                    keyring.set_password("Claude Code-credentials", os.environ.get("USER", ""), token)
+                    return True
+                except Exception as e:
+                    console.print(f"[red]Keyring write failed: {e}[/red]")
+                    return False
             else:
                 # File-based storage for Linux/Windows or explicit path
                 if target_path:

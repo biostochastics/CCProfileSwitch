@@ -22,7 +22,7 @@
   - [What CCProfileSwitch Does](#what-ccprofileswitch-does)
   - [System Architecture](#system-architecture)
   - [OAuth Token Management](#oauth-token-management)
-  - [Provider Isolation](#provider-isolation)
+  - [Seamless Provider Switching](#seamless-provider-switching)
   - [Z-AI GLM-4.6 Coder Integration](#z-ai-glm-46-coder-integration)
 - [Installation](#installation)
 - [Usage Guide](#usage-guide)
@@ -45,7 +45,7 @@ If you juggle multiple Claude accounts across personal and professional projects
 ### Key Features
 
 - **Secure Credential Storage**: Stores API keys and OAuth tokens in your system's native keyring (Keychain on macOS, Credential Manager on Windows, Secret Service on Linux)
-- **Environment Configuration**: Updates `~/.claude/settings.json` with the correct provider settings for Claude Code
+- **Shell Environment Management**: Sets environment variables for Claude Code via the `cpswitch` command
 - **Multi-Provider Support**: Seamlessly manage both Claude and Z-AI profiles with isolated configurations
 - **OAuth Preservation**: Maintains complete OAuth sessions including refresh tokens and MCP server authentication
 - **Cross-Platform**: Works on macOS, Linux, and Windows with platform-specific optimizations
@@ -73,7 +73,14 @@ cd CCProfileSwitch
 pipx install .
 
 # Initialize - auto-detects and imports your current token as 'default' profile
+# Also offers to set up shell integration automatically
 claude-profile init
+
+# The init command will:
+# 1. Import your existing Claude credentials as 'default' profile
+# 2. Detect your shell (bash/zsh/fish)
+# 3. Offer to add shell integration to ~/.zshrc or ~/.bashrc
+# 4. Enable the 'cpswitch' command for automatic environment setup
 
 # Save additional profiles with different tokens
 # Method 1: Let it auto-detect current token (if you've switched in Claude Code)
@@ -113,9 +120,9 @@ After setup, you must close and restart Claude Code to use the active profile's 
 CCProfileSwitch performs **two simple but essential tasks**:
 
 1. **Secure Credential Storage**: Stores API keys and tokens in your system's native keyring (Keychain on macOS, Credential Manager on Windows, Secret Service on Linux)
-2. **Environment Configuration**: Updates `~/.claude/settings.json` with the correct provider settings for Claude Code
+2. **Shell Environment Management**: The `cpswitch` command sets environment variables that Claude Code reads at startup
 
-**That's it.** No shell modifications, no environment variable exports, no complex configuration. Just secure storage and settings file management.
+**That's it.** Credentials stay in secure storage, environment variables are set when you switch profiles, and Claude Code reads them automatically.
 
 ### System Architecture
 
@@ -172,23 +179,25 @@ Profile switching is instant, secure, and deterministic. You always know which c
 
 #### macOS
 
-- OAuth tokens stored in **macOS Keychain** (service: `Claude Code-credentials`)
-- When switching to OAuth profiles, CCProfileSwitch **removes tokens from settings.json**
-- Why? Claude Code reads from Keychain on macOS, and settings.json overrides it
-- **After switching OAuth profiles**: Run `/login` in Claude Code to refresh the token
+- OAuth tokens stored in **macOS Keychain** by CCProfileSwitch
+- CCProfileSwitch saves complete OAuth sessions (access token, refresh token, expiration) in keyring
+- When switching between Claude accounts, CCProfileSwitch restores the OAuth for that profile
+- Claude Code reads OAuth from Keychain - CCProfileSwitch manages which OAuth is active
 
 #### Windows/Linux
 
-- OAuth tokens stored in **settings.json** (no system keychain equivalent)
-- When switching, CCProfileSwitch writes OAuth tokens to settings.json
+- OAuth tokens stored in CCProfileSwitch's secure storage
+- CCProfileSwitch writes OAuth to settings.json when switching profiles
 - Expiration warnings shown if token is stale
 - **After switching OAuth profiles**: Run `/login` in Claude Code if you see 401 errors
 
-#### Plain API Keys (All Platforms)
+#### Z-AI API Keys (All Platforms)
 
-- API keys (`sk-ant-api*`) don't expire
-- Always written to settings.json
-- No `/login` needed after switching
+- Z-AI tokens stored in CCProfileSwitch's secure keyring storage
+- Z-AI uses API keys, not OAuth
+- When you run `cpswitch`, the token is exported as `ANTHROPIC_AUTH_TOKEN` environment variable
+- Claude Code reads the token from the environment
+- No `/login` needed - authentication is via API key
 
 #### Recommended Workflow
 
@@ -213,32 +222,34 @@ $ # Close and restart Claude Code
 - Platform-specific storage (Keychain vs settings.json) requires different handling
 - `/login` command updates platform storage with fresh tokens automatically
 
-### Provider Isolation
+### Seamless Provider Switching
 
-**Claude and Z-AI profiles are completely isolated and CANNOT be switched between directly.**
+**CCProfileSwitch allows you to switch freely between Claude and Z-AI profiles with a single command.**
 
-Why? Different providers require different API endpoints and configurations. Mixing them would cause authentication failures.
+When you switch providers, CCProfileSwitch automatically:
+- Updates `ANTHROPIC_BASE_URL` for Z-AI profiles
+- Removes `ANTHROPIC_BASE_URL` for Claude profiles
+- Sets the appropriate `ANTHROPIC_AUTH_TOKEN` for each provider
+- Shows a notification when switching between providers
 
-#### Correct Workflow
+#### Workflow
 
 ```bash
-# Create separate profiles for each provider
+# Create profiles for each provider
 claude-profile save work --provider claude         # Claude profile
 claude-profile save zai-work --provider zai        # Z-AI profile
 
-# Switch within same provider: ✓ Works
-claude-profile switch work
-claude-profile switch personal  # (another Claude profile)
+# Switch freely between any profiles
+claude-profile switch work          # Switch to Claude
+claude-profile switch zai-work      # Switch to Z-AI
+claude-profile switch personal      # Switch to another Claude profile
 
-# Switch between providers: ✗ Blocked
-claude-profile switch zai-work  # Error: cannot switch from Claude to Z-AI!
-
-# To use Z-AI, create a new profile and switch to it
-claude-profile save zai-current --provider zai
-claude-profile switch zai-current  # ✓ Now using Z-AI
+# Provider switches are seamless
+# Switching from ZAI to CLAUDE
+# ✔ Switched to profile 'work'
 ```
 
-This isolation ensures your API configurations stay correct and prevents accidental mixing of credentials.
+CCProfileSwitch handles all API endpoint configuration automatically. Just restart Claude Code after switching to load the new configuration.
 
 ### Z-AI GLM-4.6 Coder Integration
 
@@ -250,43 +261,72 @@ CCProfileSwitch now supports [Z-AI's GLM-4.6 Coder](https://z.ai/subscribe?utm_c
 # 1. Get your Z-AI API key
 # Visit: https://z.ai/manage-apikey/apikey-list
 
-# 2. (Optional) Set environment variable for auto-detection
-export ZAI_API_KEY="your-zai-api-key-here"
+# 2. Initialize CCProfileSwitch (sets up shell integration automatically)
+claude-profile init
+# When prompted "Set up shell integration now?", choose Yes
 
-# 3. Create Z-AI profile
-claude-profile save zai-glm46 --provider zai
+# 3. Reload your shell
+source ~/.zshrc  # or source ~/.bashrc
 
-# 4. Switch to Z-AI
-claude-profile switch zai-glm46
+# 4. Create Z-AI profile
+claude-profile save zai-glm46 --provider zai --token your-zai-api-key
 
-# 5. Verify configuration
-claude-profile current
+# 5. Switch to Z-AI (automatically sets environment variables)
+cpswitch zai-glm46
+
+# 6. Start Claude Code
+claude
+
+# 7. Verify you're using Z-AI (should show GLM-4.6 Coder)
 ```
+
+**Important:** Z-AI requires shell environment variables. The `claude-profile init` command automatically sets up the `cpswitch` function. If you skipped this step, run `claude-profile doctor` to set it up later.
 
 #### What Happens Behind the Scenes
 
-When you create a Z-AI profile, CCProfileSwitch:
-1. Stores your Z-AI API key securely in your system keyring
-2. Updates `~/.claude/settings.json` with:
-   ```json
-   {
-     "env": {
-       "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
-       "ANTHROPIC_AUTH_TOKEN": "your-zai-api-key"
-     }
-   }
+When you switch to a Z-AI profile using `cpswitch`, CCProfileSwitch:
+1. Retrieves your Z-AI API key from system keyring
+2. Exports shell environment variables:
+   ```bash
+   export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
+   export ANTHROPIC_AUTH_TOKEN="your-zai-api-key"
+   export ANTHROPIC_DEFAULT_SONNET_MODEL="glm-4.6"
+   export ANTHROPIC_DEFAULT_OPUS_MODEL="glm-4.6"
+   export ANTHROPIC_DEFAULT_HAIKU_MODEL="glm-4.5-air"
+   unset ANTHROPIC_API_KEY  # Prevents OAuth conflicts
    ```
-3. Claude Code reads these settings and routes requests to Z-AI's API
+3. Claude Code reads these environment variables at startup and routes requests to Z-AI's API
+4. Z-AI automatically maps Claude model names to GLM models
 
-#### Model Mappings
+**Why `cpswitch` for Z-AI?** The `cpswitch` function provides Z-AI integration by:
+- Setting `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` environment variables
+- Setting model mappings so Claude Code uses GLM-4.6 instead of Sonnet
+- **Unsetting `ANTHROPIC_API_KEY`** to prevent OAuth conflicts
+- Claude Code launched from the same shell inherits these variables
 
-Z-AI GLM-4.6 automatically maps to Claude Code's model environment variables:
+**Note:** CCProfileSwitch does NOT write to `~/.claude/settings.json`. Z-AI works entirely through shell environment variables.
 
-- `ANTHROPIC_DEFAULT_OPUS_MODEL` → `GLM-4.6`
-- `ANTHROPIC_DEFAULT_SONNET_MODEL` → `GLM-4.6`
-- `ANTHROPIC_DEFAULT_HAIKU_MODEL` → `GLM-4.5-Air`
+#### Switching Back to Claude from Z-AI
 
-You can customize these in `~/.claude/settings.json` if needed. See [Z-AI's Claude Code documentation](https://docs.z.ai/devpack/tool/claude) for details.
+To switch from Z-AI back to your Claude subscription (or another Claude profile):
+
+```bash
+# Method 1: Use the cpreset helper (recommended)
+cpreset  # Unsets all Z-AI environment variables
+claude   # Uses your active Claude OAuth (from /login or last profile switch)
+
+# Method 2: Switch to a specific Claude profile
+cpreset  # Clear Z-AI config first
+claude-profile switch work  # Switch to 'work' Claude profile
+claude
+
+# Method 3: Manual unset
+unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL
+unset ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL
+claude
+```
+
+The `cpreset` command clears Z-AI configuration. After that, Claude Code uses whichever Claude OAuth profile is active (managed by CCProfileSwitch or via `/login`).
 
 ## Installation
 
@@ -343,6 +383,64 @@ Once published to PyPI:
 pip install cc-profile-switch
 claude-profile --help
 ```
+
+### Shell Integration (Required for Z-AI)
+
+**For Claude subscription:** Use `/login` in Claude Code - no profile switching needed.
+
+**For Z-AI profiles:** Shell integration is **required** - the `cpswitch` command sets environment variables that Claude Code reads at startup.
+
+#### Automated Setup (Recommended)
+
+During `claude-profile init`, CCProfileSwitch will offer to set up shell integration automatically:
+
+```bash
+claude-profile init
+
+# Will prompt:
+# Set up shell integration now? [Y/n]: y
+# ✓ Shell integration added to /Users/you/.zshrc
+# Run 'source ~/.zshrc' or restart your terminal to activate
+```
+
+This adds two commands:
+
+**`cpswitch <profile>`** - Switch to a Z-AI profile:
+- Runs `claude-profile switch <name> --eval` internally
+- Automatically sets `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` in your current shell
+- For Z-AI profiles: Sets model mappings (`ANTHROPIC_DEFAULT_*_MODEL` → `glm-4.6`)
+- **Unsets `ANTHROPIC_API_KEY`** to prevent conflicts
+- Shows confirmation of what was set
+
+**`cpreset`** - Clear Z-AI configuration:
+- Unsets all `ANTHROPIC_*` environment variables
+- Claude Code will use active Claude OAuth profile (managed by CCProfileSwitch or `/login`)
+
+#### Manual Setup (If needed)
+
+```bash
+# Add to ~/.zshrc or ~/.bashrc
+source /path/to/CCProfileSwitch/shell-integration.sh
+
+# Or check setup status anytime
+claude-profile doctor
+```
+
+#### Option 2: Run export commands manually
+
+```bash
+# Switch profile first
+claude-profile switch zai-real
+
+# Then run the export commands shown in the output:
+export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
+export ANTHROPIC_AUTH_TOKEN="your-zai-api-key"
+
+# Finally, start Claude Code
+claude
+```
+
+**Why shell environment variables?** Claude Code reads `ANTHROPIC_BASE_URL` from the process environment at startup. Setting it in `settings.json` is not sufficient - it must be an environment variable in the shell where you launch Claude Code.
 
 ## Usage Guide
 
@@ -461,6 +559,9 @@ claude-profile switch --fzf         # Use fzf for selection (if installed)
 Options:
 - `--show-tokens` - Show tokens in selection list
 - `--fzf/--no-fzf` - Use fzf for interactive selection
+- `--eval` - Output pure shell export commands (used by cpswitch function)
+
+**For Z-AI profiles:** Use the `cpswitch` function instead of running `claude-profile switch` directly. The `cpswitch` function uses the `--eval` flag internally to set environment variables automatically.
 
 ---
 
@@ -711,6 +812,24 @@ If no secure backend is available (rare), the tool will warn and suggest install
 
 ### Troubleshooting
 
+#### Keychain authorization prompts (macOS)
+
+If you're repeatedly prompted to authorize keychain access, you can grant permanent access:
+
+```bash
+# Run doctor to see instructions
+claude-profile doctor
+
+# Manual steps:
+# 1. Open 'Keychain Access' app
+# 2. Search for 'Claude Code-credentials' and 'claude-profile-manager'
+# 3. Double-click each entry → Access Control tab
+# 4. Select 'Allow all applications to access this item'
+# 5. Or add your terminal app to allowed apps
+```
+
+**Note:** After first authorization, the keyring library minimizes prompts automatically. Permanent access setup is optional but recommended for smoother experience.
+
 #### No secure keyring backend available
 
 ```bash
@@ -774,19 +893,105 @@ claude-profile switch work
 # This refreshes the OAuth token in Keychain/settings.json
 ```
 
-#### Provider switching blocked
+#### 401 error after switching from API Usage to Claude subscription
 
-If you see an error about switching between Claude and Z-AI:
+If you switch from an API key profile (API Usage Billing) to a Claude subscription profile (OAuth) and get a 401 authentication error after running `/login`, you may need to explicitly sign out first:
 
 ```bash
-# Create a new profile for the target provider
-claude-profile save new-profile --provider zai  # or claude
+# In Claude Code, sign out completely
+> /logout
+Successfully logged out from your Anthropic account.
 
-# Switch to the new profile
-claude-profile switch new-profile
+# Then login again with your subscription account
+> /login
+Login successful
+
+# Now switching between subscription profiles should work
+claude-profile switch your-subscription-profile
 ```
 
-Remember: Provider isolation prevents accidental mixing of credentials. This is by design.
+**Why this happens**: Claude Code may cache authentication state from your API key session. Explicitly logging out clears this state before authenticating with OAuth.
+
+#### Switching between providers
+
+CCProfileSwitch handles both Claude OAuth profiles and Z-AI API key profiles:
+
+```bash
+# Switching between Claude profiles (OAuth)
+claude-profile switch personal  # Switch to personal Claude account
+claude-profile switch work      # Switch to work Claude account
+
+# Switching to Z-AI (use cpswitch for environment variables)
+source ~/CCProfileSwitch/shell-integration.sh
+cpswitch zai-profile
+claude  # Launch from same shell
+
+# Switching back from Z-AI to Claude
+cpreset  # Clears Z-AI env vars
+claude-profile switch work  # Optional: switch to specific Claude profile
+claude   # Uses Claude OAuth (from profile switch or /login)
+```
+
+**Claude profiles:** Managed via OAuth tokens stored in CCProfileSwitch's secure keyring. Use `claude-profile switch`.
+**Z-AI profiles:** Managed via API keys exported as environment variables. Use `cpswitch`.
+**Switching from Z-AI to Claude:** Use `cpreset` to clear Z-AI environment variables.
+
+#### Z-AI Integration Not Working
+
+If Claude Code still identifies as "Claude" instead of connecting to Z-AI after switching profiles:
+
+**1. Verify environment configuration:**
+```bash
+# Run comprehensive diagnostics
+claude-profile doctor
+
+# Check environment variables in your shell
+echo $ANTHROPIC_BASE_URL    # Should show Z-AI URL
+echo $ANTHROPIC_AUTH_TOKEN  # Should show your token
+echo $ANTHROPIC_DEFAULT_SONNET_MODEL  # Should show glm-4.6
+```
+
+**2. Common causes and solutions:**
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| **`ANTHROPIC_API_KEY` conflict** | **OAuth token from `/login` overrides Z-AI config** | **Use `cpswitch` (automatically unsets it) before launching Claude Code** |
+| **Model still shows Sonnet** | **Model mappings not set** | **Use `cpswitch` (sets `ANTHROPIC_DEFAULT_*_MODEL` env vars)** |
+| Claude Code launched from desktop | Desktop launchers don't inherit shell env vars | Launch Claude Code from terminal: `claude` |
+| Didn't use `cpswitch` | Environment variables not set | Use `cpswitch <profile>` instead of `claude-profile switch` |
+| Wrong provider flag | Profile saved as Claude instead of Z-AI | Check with `claude-profile show <name>`, re-save with `--provider zai` |
+
+**3. Manual verification:**
+```bash
+# Check environment variables (NOT settings.json)
+echo $ANTHROPIC_BASE_URL    # Should show: https://api.z.ai/api/anthropic
+echo $ANTHROPIC_AUTH_TOKEN  # Should show your Z-AI key
+echo $ANTHROPIC_API_KEY     # Should be EMPTY
+echo $ANTHROPIC_DEFAULT_SONNET_MODEL  # Should show: glm-4.6
+
+# Verify in Claude Code with /status
+# Auth token: ANTHROPIC_AUTH_TOKEN
+# Anthropic base URL: https://api.z.ai/api/anthropic
+# Model: Default (glm-4.6)
+```
+
+**4. Verify the profile was saved correctly:**
+```bash
+# Show profile details
+claude-profile show <your-zai-profile-name>
+
+# Should display:
+# Provider: ZAI
+# API URL: https://api.z.ai/api/anthropic
+```
+
+**Recent bug fixes (if you installed before 2025-01-07):**
+- **Bug #1**: validate_token tuple unpacking - prevented Z-AI tokens from being saved
+- **Bug #2**: rename lost provider metadata - Z-AI profiles became Claude profiles after renaming
+- **Bug #3**: cycle didn't update settings.json - **CRITICAL** for Z-AI, ANTHROPIC_BASE_URL never got set
+- **Solution**: Update to latest version: `cd CCProfileSwitch && git pull && pipx reinstall .`
+
+If issues persist after verification, the `claude-profile doctor` command now includes detailed Z-AI diagnostics to help pinpoint the exact problem.
 
 ## Development
 
