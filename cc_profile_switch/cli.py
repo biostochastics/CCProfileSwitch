@@ -880,28 +880,40 @@ def import_profiles(
                 continue
 
             token = data.get("token")
-            if not token or not validate_token(token):
+            provider = data.get("provider", PROVIDER_CLAUDE)
+            
+            # Check if token is masked (contains many asterisks)
+            is_masked = token and ("*" * 10) in token
+            
+            # Validate token
+            token_valid = False
+            if token and not is_masked:
+                token_valid, _ = validate_token(token, provider)
+            
+            if not token or is_masked or not token_valid:
+                reason = "masked" if is_masked else "missing or invalid"
                 show_warning(
-                    f"Profile '{profile_name}' has no usable token in the import file"
+                    f"Profile '{profile_name}' has {reason} token in the import file"
                 )
                 if Confirm.ask("Provide the token now?", default=True):
                     token = Prompt.ask(
                         f"Enter token for '{profile_name}'", password=True
                     ).strip()
-                    if not token or not validate_token(token):
+                    token_valid, error_msg = validate_token(token, provider)
+                    if not token or not token_valid:
                         show_warning(
                             f"Skipping profile '{profile_name}' - "
-                            f"provided token invalid"
+                            f"provided token invalid: {error_msg}"
                         )
                         continue
                 else:
-                    show_warning(f"Skipping profile '{profile_name}' - token missing")
+                    show_warning(f"Skipping profile '{profile_name}' - token {reason}")
                     continue
-
             metadata = data.get("metadata", {})
             metadata["imported"] = datetime.now().isoformat()
+            api_url = data.get("api_url")
 
-            if storage.save_profile(profile_name, token, metadata):
+            if storage.save_profile(profile_name, token, metadata, provider=provider, api_url=api_url):
                 imported_count += 1
                 imported_names.append(profile_name)
                 console.print(f"[green]Imported: {profile_name}[/green]")
