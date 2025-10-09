@@ -109,6 +109,8 @@ For Z-AI: Use `cpswitch zai` (sets environment variables automatically).
 
 **Value Proposition**: 3× usage at 1/7 cost vs Claude standard pricing.
 
+> **⚠️ Note**: Due to API base URL and authentication token handling complexities in Claude Code, we recommend using Z-AI integration through **KiloCode** or **Crush** instead. These tools provide more reliable Z-AI connectivity without the environment variable conflicts that can occur with profile switching. Use CCProfileSwitch with Z-AI only if you understand the authentication precedence rules and are comfortable troubleshooting API/AUTH key confusion.
+
 ### Setup (One-Time)
 
 ```bash
