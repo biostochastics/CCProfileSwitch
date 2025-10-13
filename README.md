@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/biostochastics-ccprofileswitch-badge.png)](https://mseep.ai/app/biostochastics-ccprofileswitch)
+
 # CCProfileSwitch
 
 ```
